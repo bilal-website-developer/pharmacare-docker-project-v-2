@@ -85,7 +85,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Current status
 
-- **Current checkout:** branch `security/label-escaping`, HEAD `a10e6ee` (`return bill`). No SQL or deployment was performed in the read-only audit; the working tree was clean before audit reports were created.
+- **Current checkout:** branch `feature/mongo-migration`, based on the clean `security/revoke-public-execute` checkout at `17dfc05` (`blabla`). Phase 0 Mongo migration inventory is in `docs/MONGO_MIGRATION_INVENTORY.md`; no application code, SQL, live database, or deployment was changed.
 - **Added; migration owner-reported applied and RPC ACL checked:** Header Stock Alert Bell, accessible alert panel, per-user unseen indicators, permission-aware Products/Stock Inventory navigation, and stock-change refresh events. `stock_alerts_summary(integer)` and its rollback are in `supabase/migrations/20261013140000_stock_alerts_summary.sql` and `supabase/rollback/rollback_20261013140000_stock_alerts_summary.sql`; alert counts/data and UI behavior still need runtime testing.
 - **Verified in history:** The low-stock alert feature is committed as `da7ed5d` on `feature/low-stock-alerts`; it is present in that commit, not missing from the repository history.
 - **Fixed in `b62b547`:** Product-controlled label text is HTML-escaped in generated print markup using the shared receipt helper; hostile markup and quoted attribute payloads are covered by tests. The existing receipt/memo rendering behavior is unchanged.
@@ -104,7 +104,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - **W6 TypeScript baseline:** `strict` and `noUnusedParameters` are enabled after both command-line measurements returned zero diagnostics. `noUnusedLocals` remains disabled because its 16 remaining diagnostics are in preserved components and the retained `RepositoryReviewView` import. The broader source cleanup is committed as `cce45bb`; ESLint packages/config remain pending owner approval and TypeScript 7 compatibility review. Details and release-date evidence are in `docs/EXECUTION_PROGRESS.md`.
 - **W7 client bundle optimization:** Sidebar screens and modal views load on demand (Dashboard, login, and shell remain eager); Purchase History XLSX, receipt print workflow, and barcode label code are deferred until used. Loading and retryable screen-error states are present. First-load production gzip measured 172.26 kB, down from 418.24 kB and below the 200 kB target. Lint, tests, and build pass; see `docs/EXECUTION_PROGRESS.md` for emitted chunk sizes. Physical slow/offline-network and route-refresh checks remain manual.
 - **Security ACL plan:** Owner-reported live ACL audit found `stock_batches` and the other four 4c cost-bearing tables revoked; a later `stock_batches` grant had undone its revoke once. Reassert revokes in the new lockdown migration. Staged files A-D and rollback scripts are proposals only and have not been applied. The owner reports profile DML already revoked; file D reasserts that state.
-- **Next:** `docs/MASTER_PLAN.md` is approved with owner decisions recorded. The active checkout is `security/label-escaping`; the staging bootstrap/catalog comparison in `docs/STAGING_BOOTSTRAP.md` remains the gate before any multi-shop migration. Package 3's client-only barcode UI is complete; track further package state in `docs/EXECUTION_PROGRESS.md`. Hardware scanning/printing remains unverified.
+- **Next:** Mongo migration work is gated by owner review of `docs/MONGO_MIGRATION_INVENTORY.md` and its open questions. The pre-migration Supabase branch remains unchanged. Existing staging bootstrap and hardware verification items remain open on their respective branches.
 
 ## Known issues and Later
 
@@ -141,6 +141,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
+- 2026-10-14 — Created `feature/mongo-migration` from the owner-confirmed clean `security/revoke-public-execute` checkout and completed read-only Phase 0 source inventory in `docs/MONGO_MIGRATION_INVENTORY.md`. No SQL, live database, application code, or deployment was changed; live grants/schema and runtime behavior remain unverified.
 - 2026-10-14 — Read-only code/database/security/logic/returns audit recorded in `docs/audit/`. Local lint, 18 test scripts (122 tests), build, and production dependency audit pass. No SQL, deployment, demo data, or application-code change was made for the audit. Key current risks: missing active-POS prescription enforcement, forward-folder rollback files, dashboard sample stock KPIs, in-memory Cash Book, and return/report settlement gaps.
 - 2026-10-14 — Clarified the return-audit count reconciliation: the earlier aggregate did not have a recoverable numbered checklist, and the only supported row-level status change is the sale-void interaction moving from PARTIAL to MISSING. Documentation only; no code, SQL, or deployment.
 - 2026-10-14 — Updated audit findings from owner-supplied live ACL/RLS output: direct return-table privileges are false with RLS enabled; anon EXECUTE is true on 16 SECURITY DEFINER functions; authenticated table grants need policy/column review. Return migration ledger status and runtime authorization remain unverified. No SQL, code, or deployment.
@@ -192,15 +193,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-14T08:44:15.363Z
-Git branch: security/revoke-public-execute
+Generated at (UTC): 2026-10-14T09:38:31.473Z
+Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- blabla
 - return bill
 - Fix stored XSS in product label printing
 - feat: add header low stock alerts
 - plan for admin access
-- chore: enable stricter TypeScript checks
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
