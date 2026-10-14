@@ -145,10 +145,15 @@ async function ensureIndexes(database: Db): Promise<void> {
     ],
     medicines: [
       { key: { shopId: 1, normalizedCode: 1 }, unique: true, name: 'shop_medicine_code_unique' },
+      { key: { shopId: 1, normalizedName: 1 }, unique: true, name: 'shop_medicine_name_unique' },
       { key: { shopId: 1, isActive: 1, normalizedName: 1 }, name: 'shop_medicine_active_name' },
       { key: { shopId: 1, categoryId: 1, isActive: 1 }, name: 'shop_medicine_category' },
       { key: { shopId: 1, brandId: 1, isActive: 1 }, name: 'shop_medicine_brand' },
       { key: { shopId: 1, drugClass: 1, isActive: 1 }, name: 'shop_medicine_class' },
+    ],
+    medicineUnits: [
+      { key: { shopId: 1, medicineId: 1, normalizedName: 1 }, unique: true, name: 'shop_medicine_unit_name_unique' },
+      { key: { shopId: 1, medicineId: 1, isDefaultSaleUnit: 1 }, name: 'shop_medicine_unit_default' },
     ],
     barcodeClaims: [
       { key: { shopId: 1, normalizedBarcode: 1 }, unique: true, name: 'shop_barcode_unique' },

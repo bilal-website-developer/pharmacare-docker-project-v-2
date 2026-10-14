@@ -16,9 +16,10 @@
     "test:app": "tsx --test src/app.test.ts",
     "test:auth-crypto": "tsx --test src/auth-crypto.test.ts",
     "test:auth-routes": "tsx --test src/auth-routes.test.ts",
+    "test:catalog": "tsx --test src/catalog.test.ts",
     "test:policy": "tsx --test src/policy.test.ts",
     "test:user-routes": "tsx --test src/user-routes.test.ts",
-    "test": "npm run test:config && npm run test:app && npm run test:auth-crypto && npm run test:auth-routes && npm run test:policy && npm run test:user-routes"
+    "test": "npm run test:config && npm run test:app && npm run test:auth-crypto && npm run test:auth-routes && npm run test:catalog && npm run test:policy && npm run test:user-routes"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

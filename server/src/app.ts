@@ -6,14 +6,18 @@ import { MongoPharmacyRepository } from './mongo-repository.js';
 import type { PharmacyRepository } from './models.js';
 import type { AppConfig } from './config.js';
 import { registerUserRoutes } from './user-routes.js';
+import { MongoCatalogRepository, type CatalogRepository } from './catalog-repository.js';
+import { registerCatalogRoutes } from './catalog-routes.js';
 
 export function createApp(
   mongoClient: MongoClient,
   config?: AppConfig,
   repository?: PharmacyRepository,
+  catalogRepository?: CatalogRepository,
 ): FastifyInstance {
   const app = Fastify({
     trustProxy: true,
+    bodyLimit: 6 * 1024 * 1024,
     logger: {
       redact: {
         paths: [
@@ -67,6 +71,12 @@ export function createApp(
     };
     registerAuthRoutes(app, pharmacyRepository, tokenConfig);
     registerUserRoutes(app, pharmacyRepository, tokenConfig);
+    registerCatalogRoutes(
+      app,
+      catalogRepository ?? new MongoCatalogRepository(mongoClient, config.mongoDbName),
+      pharmacyRepository,
+      tokenConfig,
+    );
   }
 
   return app;
