@@ -201,15 +201,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-14T11:07:23.882Z
+Generated at (UTC): 2026-10-14T11:25:16.347Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: add MongoDB Docker API foundation
 - docs: define MongoDB migration design
 - docs: inventory Mongo migration scope
 - blabla
 - return bill
-- Fix stored XSS in product label printing
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
@@ -363,7 +363,11 @@ src/
 
 Test files:
 - server/src/app.test.ts
+- server/src/auth-crypto.test.ts
+- server/src/auth-routes.test.ts
 - server/src/config.test.ts
+- server/src/policy.test.ts
+- server/src/user-routes.test.ts
 - src/components/inventory/inventoryUiLogic.test.ts
 - src/components/inventory/productFilterLogic.test.ts
 - src/components/inventory/productImportLogic.test.ts

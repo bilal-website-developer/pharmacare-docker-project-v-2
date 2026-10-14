@@ -8,7 +8,7 @@ const mongoClient = new MongoClient(config.mongoUri, {
   serverSelectionTimeoutMS: 5000,
 });
 
-const app = createApp(mongoClient);
+const app = createApp(mongoClient, config);
 let isShuttingDown = false;
 
 async function shutdown(signal: NodeJS.Signals): Promise<void> {

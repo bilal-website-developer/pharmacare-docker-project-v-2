@@ -112,10 +112,16 @@ async function ensureAppUser(
 
 async function ensureIndexes(database: Db): Promise<void> {
   const indexes: Record<string, IndexDescription[]> = {
+    shops: [
+      { key: { slug: 1 }, unique: true, name: 'shop_slug_unique' },
+    ],
     users: [
       { key: { shopId: 1, usernameNormalized: 1 }, unique: true, name: 'shop_username_unique' },
       { key: { shopId: 1, emailNormalized: 1 }, unique: true, name: 'shop_email_unique' },
       { key: { shopId: 1, role: 1, isActive: 1 }, name: 'shop_role_active' },
+    ],
+    authRateLimits: [
+      { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'auth_rate_limit_expiry_ttl' },
     ],
     refreshSessions: [
       { key: { tokenHash: 1 }, unique: true, name: 'refresh_token_hash_unique' },

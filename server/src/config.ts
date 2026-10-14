@@ -12,6 +12,7 @@ const configSchema = z.object({
   MONGO_APP_PASSWORD: strongSecret(32),
   JWT_ACCESS_SECRET: strongSecret(48),
   REFRESH_TOKEN_PEPPER: strongSecret(48),
+  BOOTSTRAP_SHOP_SLUG: z.string().trim().min(1).max(63).regex(/^[a-zA-Z0-9-]+$/).default('main'),
 });
 
 export type AppConfig = {
@@ -20,6 +21,11 @@ export type AppConfig = {
   port: number;
   mongoUri: string;
   mongoDbName: string;
+  accessTokenSecret: string;
+  refreshTokenPepper: string;
+  accessTokenTtlSeconds: number;
+  refreshTokenTtlSeconds: number;
+  bootstrapShopSlug: string;
 };
 
 function encodeCredential(value: string): string {
@@ -58,5 +64,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port: values.PORT,
     mongoUri: `mongodb://${username}:${password}@${values.MONGO_HOST}:${values.MONGO_PORT}/${values.MONGO_APP_DB}?authSource=${values.MONGO_APP_DB}&replicaSet=rs0`,
     mongoDbName: values.MONGO_APP_DB,
+    accessTokenSecret: values.JWT_ACCESS_SECRET,
+    refreshTokenPepper: values.REFRESH_TOKEN_PEPPER,
+    accessTokenTtlSeconds: 15 * 60,
+    refreshTokenTtlSeconds: 7 * 24 * 60 * 60,
+    bootstrapShopSlug: values.BOOTSTRAP_SHOP_SLUG.toLowerCase(),
   };
 }
