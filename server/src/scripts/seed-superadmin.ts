@@ -163,7 +163,7 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error) {
-  const reason = error instanceof Error ? error.message : 'unknown_error';
+  const reason = error instanceof Error ? error.name : 'unknown_error';
   process.stderr.write(`${JSON.stringify({ event: 'superadmin_seed_failed', reason })}\n`);
   process.exitCode = 1;
 }

@@ -22,7 +22,7 @@ npm run build
 
 Vite serves on port 3000. `npm test` runs the project's registered unit tests; see the generated test-file list below for coverage.
 
-The local MongoDB/Fastify health-only stack is documented in `docs/DOCKER.md`; it requires Docker Desktop and does not replace the still-active Supabase frontend paths.
+The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requires Docker Desktop. MongoDB currently backs the API's authentication and user-management routes only; the frontend still uses the existing Supabase paths.
 
 ## Folder map
 
@@ -37,7 +37,7 @@ The local MongoDB/Fastify health-only stack is documented in `docs/DOCKER.md`; i
 - Other feature screens in `src/components/` include Dashboard, Reports, Suppliers, Cash Book, Controlled Drugs, Master Data, and print-request administration.
 - `src/utils/`, `src/types/`, `src/data/`: reusable logic, TypeScript domain shapes, and mock pharmacy data.
 - `supabase/migrations/`, `supabase/functions/`, `supabase/baseline/`: database migrations, Edge Functions, and a supplied schema snapshot.
-- `server/`: Phase 2 Fastify/TypeScript API skeleton and MongoDB replica-set initializer; only the health endpoint exists so far.
+- `server/`: Fastify/TypeScript API, MongoDB replica-set initializer, authentication/session routes, authorization helpers, Manage Users routes, and the first-run super-admin CLI. Business modules beyond auth/user management remain unimplemented.
 - `docker/`, `docker-compose.yml`, `Dockerfile`: local Mongo/API/web container setup and Nginx configuration. See `docs/DOCKER.md`.
 - `docs/`: database references, `MASTER_PLAN.md`, `MULTI_SHOP_FULL_PLAN.md`, execution progress, redesign notes, and this context.
 - `scripts/`, `.githooks/`: context generation and commit-hook tooling.
@@ -51,13 +51,13 @@ The local MongoDB/Fastify health-only stack is documented in `docs/DOCKER.md`; i
 - Mixed persistence: the active POS catalog and sales use `pos_catalog()` and `post_sale()` RPCs; customer/ledger and sales-history paths also use RPCs. Dashboard stock/expiry KPIs still use `INITIAL_PRODUCTS` sample data, and Cash Book transactions/expenses remain React in-memory state. `POSScreen` and controlled-drug sample types are legacy/unreferenced paths; confirm each active page before relying on its data source.
 - Other storage: unknown; no general file/object-storage workflow is established by the checked-in frontend docs.
 - Shared production data behavior depends on Supabase deployment and the live schema, which may differ from checked-in migrations.
-- Phase 2 adds a local MongoDB service and API container definition, but neither has been started or verified; MongoDB runtime behavior and API health remain unknown. The frontend still uses its existing Supabase code.
+- The local Docker stack contains authenticated MongoDB on a private network and a Fastify API with health, auth, and Manage Users routes. It has not been started by the owner; container networking, MongoDB transactions, and runtime behavior remain unverified. The frontend still uses its existing Supabase code.
 
 ## Roles and permissions
 
 Role names in `src/types/pharmacy.ts`: `admin`, `super_admin`, `manager`, `cashier`, `accountant`.
 
-Permission keys in `src/permissions.tsx`: `pos`, `products`, `categories`, `suppliers`, `customers`, `sales_history`, `purchase_history`, `purchases`, `expenses`, `stock_inventory`, `reports`, `manage_users`, plus POS print toggles `pos_print_sale` and `pos_print_payment`.
+Frontend permission keys in `src/permissions.tsx`: `pos`, `products`, `categories`, `suppliers`, `customers`, `sales_history`, `purchase_history`, `purchases`, `expenses`, `stock_inventory`, `reports`, `manage_users`, plus POS print toggles `pos_print_sale` and `pos_print_payment`. The new API additionally allows `stock_alerts` to meet the migration contract.
 
 UI defaults: Admin and Super Admin get every module. Manager gets POS, Products, Categories, Suppliers, Customers, Sales History, Purchase History, Purchases, Stock Inventory, and Reports. Cashier gets POS and Customers. Accountant gets Customers, Suppliers, Sales History, Purchase History, Expenses, and Reports. Non-admin permissions can be configured; admin roles use their full defaults. Dashboard/help and personal print requests are available to all in the UI; Settings, Trash Bin, and print-request administration are admin-only. UI checks do not replace database/server authorization.
 
@@ -91,7 +91,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Current status
 
-- **Current checkout:** branch `feature/mongo-migration`, based on the clean `security/revoke-public-execute` checkout at `17dfc05` (`blabla`). Phase 0 inventory is in `docs/MONGO_MIGRATION_INVENTORY.md`; Phase 1 design/threat model are in `docs/MONGO_DESIGN.md` and `docs/MONGO_THREAT_MODEL.md`; Phase 2 Docker/API health skeleton is implemented locally. Lint, tests (126), build, API dependency audit, Compose syntax, and PowerShell syntax checks passed; no image/container/health endpoint was run. No business API routes, live database, or deployment has been added.
+- **Current checkout:** branch `feature/mongo-migration`, based on the clean `security/revoke-public-execute` checkout at `17dfc05` (`blabla`). Phase 0 inventory and Phase 1 design/threat model are documented; Phase 2 Docker/API foundation and Phase 3 auth/user-management API are implemented. Local root lint, 152 tests, build, and server dependency audit passed. The frontend is still on Supabase, and business routes beyond auth/users are not implemented. These checks do not verify MongoDB transactions, Compose runtime, HTTP health, or production behavior; no live database or deployment has been used.
 - **Added; migration owner-reported applied and RPC ACL checked:** Header Stock Alert Bell, accessible alert panel, per-user unseen indicators, permission-aware Products/Stock Inventory navigation, and stock-change refresh events. `stock_alerts_summary(integer)` and its rollback are in `supabase/migrations/20261013140000_stock_alerts_summary.sql` and `supabase/rollback/rollback_20261013140000_stock_alerts_summary.sql`; alert counts/data and UI behavior still need runtime testing.
 - **Verified in history:** The low-stock alert feature is committed as `da7ed5d` on `feature/low-stock-alerts`; it is present in that commit, not missing from the repository history.
 - **Fixed in `b62b547`:** Product-controlled label text is HTML-escaped in generated print markup using the shared receipt helper; hostile markup and quoted attribute payloads are covered by tests. The existing receipt/memo rendering behavior is unchanged.
@@ -147,6 +147,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
+- 2026-10-14 — Implemented Phase 3 Mongo-backed login/refresh/logout/me, rotating hashed refresh sessions, rate limiting and lockout, role/permission middleware, Manage Users routes/policy, append-only audit entries, and interactive super-admin bootstrap. Root lint, 152 tests, build, and API dependency audit (0 vulnerabilities) pass locally; Docker/Mongo runtime and frontend cut-over remain unverified/not performed.
 - 2026-10-14 — Added Phase 2 Docker Compose topology, MongoDB keyfile/replica-set initialization, least-privilege app user/index initialization, Nginx frontend/API proxy, secret generator, and Fastify Mongo health skeleton. Lint, 126 tests, build, API audit, Compose syntax, and PowerShell syntax passed; no container was started. Owner-run Compose/HTTP verification remains pending.
 - 2026-10-14 — Drafted Phase 1 Mongo collection/API design and top-15 threat model; added the phase tracker. Documentation only; implementation and security controls await owner approval and verification.
 - 2026-10-14 — Created `feature/mongo-migration` from the owner-confirmed clean `security/revoke-public-execute` checkout and completed read-only Phase 0 source inventory in `docs/MONGO_MIGRATION_INVENTORY.md`. No SQL, live database, application code, or deployment was changed; live grants/schema and runtime behavior remain unverified.
@@ -201,20 +202,21 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-14T11:25:16.347Z
+Generated at (UTC): 2026-10-14T11:34:12.167Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- :qqww:
 - feat: add MongoDB Docker API foundation
 - docs: define MongoDB migration design
 - docs: inventory Mongo migration scope
 - blabla
-- return bill
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
 - - `build:web`: `vite build`
 - - `build`: `npm run build:web && npm --prefix server run build`
+- - `seed:superadmin`: `docker compose exec api npm run seed:superadmin`
 - - `preview`: `vite preview`
 - - `clean`: `rm -rf dist server.js`
 - - `prepare`: `node scripts/setup-hooks.mjs`
@@ -391,6 +393,7 @@ Test files:
 
 Environment variable names from .env.example files (values are not read into this block):
 - APP_URL
+- BOOTSTRAP_SHOP_SLUG
 - DEMO_MODE
 - GEMINI_API_KEY
 - JWT_ACCESS_SECRET

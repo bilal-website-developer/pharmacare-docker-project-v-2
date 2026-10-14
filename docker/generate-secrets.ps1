@@ -47,6 +47,7 @@ $lines = @(
     "MONGO_APP_PASSWORD=$(New-Secret -ByteCount 48 -RequireDiversity)"
     "JWT_ACCESS_SECRET=$(New-Secret -ByteCount 64 -RequireDiversity)"
     "REFRESH_TOKEN_PEPPER=$(New-Secret -ByteCount 64 -RequireDiversity)"
+    'BOOTSTRAP_SHOP_SLUG=main'
     'VITE_SUPABASE_URL='
     'VITE_SUPABASE_ANON_KEY='
 )

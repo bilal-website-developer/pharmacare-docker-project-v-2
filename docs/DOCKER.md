@@ -33,6 +33,16 @@ docker compose ps
 
 `docker compose up` waits for MongoDB health, then `mongo-init` initiates `rs0`, creates the app user with `readWrite` on `pharmacare` only, and creates the planned indexes. The API starts after initialization and MongoDB health checks pass. Nginx starts after the API health check passes.
 
+## Bootstrap the first API user
+
+After the stack is running, create the initial super-admin interactively:
+
+```powershell
+npm run seed:superadmin
+```
+
+The command attaches to the API container, prompts for shop/user details and a hidden password, and refuses to create a second bootstrap user in that shop. It stores only the Argon2id password hash. The existing frontend still authenticates through its legacy Supabase integration; this bootstrap does not cut over the UI.
+
 ## Verify the local health response
 
 ```powershell

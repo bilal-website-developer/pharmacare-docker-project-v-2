@@ -97,6 +97,28 @@ test('login failures use a generic response and lock out after five failed passw
   }
 });
 
+test('unknown user and incorrect password have identical public failure responses', async () => {
+  const { app, client } = await setup();
+  try {
+    const wrongPassword = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { shopSlug: 'test-shop', usernameOrEmail: 'cashier', password: 'wrong-password' },
+    });
+    const unknownUser = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { shopSlug: 'test-shop', usernameOrEmail: 'unknown-user', password: 'wrong-password' },
+    });
+    assert.equal(wrongPassword.statusCode, 401);
+    assert.equal(unknownUser.statusCode, 401);
+    assert.deepEqual(unknownUser.json(), wrongPassword.json());
+  } finally {
+    await app.close();
+    await client.close();
+  }
+});
+
 test('refresh rotates the cookie and reuse of the old token revokes its full family', async () => {
   const { app, client, repository } = await setup();
   try {

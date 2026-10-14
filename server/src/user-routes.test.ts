@@ -259,7 +259,32 @@ test('unauthenticated access and invalid ObjectId paths are denied', async () =>
       url: '/api/users/not-an-object-id',
       headers: { authorization: 'Bearer malformed' },
     });
+
     assert.equal(invalidId.statusCode, 401);
+  } finally {
+    await app.close();
+    await client.close();
+  }
+});
+
+test('authenticated user without Manage Users permission is denied user administration', async () => {
+  const repository = new MemoryRepository();
+  const shop = repository.addShop();
+  const cashier = repository.addUser(shop, {
+    username: 'cashier',
+    email: 'cashier@example.test',
+    role: 'cashier',
+    permissions: ['pos'],
+  });
+  const { app, client } = await makeApp(repository);
+  try {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/users',
+      headers: { authorization: `Bearer ${bearer(cashier)}` },
+    });
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(response.json(), { error: 'FORBIDDEN' });
   } finally {
     await app.close();
     await client.close();

@@ -7,6 +7,7 @@
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build:web": "vite build",
     "build": "npm run build:web && npm --prefix server run build",
+    "seed:superadmin": "docker compose exec api npm run seed:superadmin",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "prepare": "node scripts/setup-hooks.mjs",

@@ -13,7 +13,7 @@ import {
   type TokenConfig,
 } from './auth-crypto.js';
 import type { AuditRecord, PharmacyRepository, RefreshSessionRecord, UserRecord } from './models.js';
-import { MODULE_KEYS, PERMISSION_KEYS, permissionSchema, type PermissionKey, type Role } from './permissions.js';
+import { MODULE_KEYS, permissionSchema, type PermissionKey, type Role } from './permissions.js';
 
 const loginSchema = z.object({
   shopSlug: z.string().trim().min(1).max(63).regex(/^[a-zA-Z0-9-]+$/),
@@ -156,7 +156,12 @@ export function requirePermission(permission: PermissionKey) {
     }
     const permissions: readonly PermissionKey[] =
       request.authUser.role === 'admin' || request.authUser.role === 'super_admin'
-      ? PERMISSION_KEYS
+      ? [
+        ...MODULE_KEYS,
+        ...safePermissions(request.authUser).filter((permission) =>
+          permission === 'pos_print_sale' || permission === 'pos_print_payment',
+        ),
+      ]
       : safePermissions(request.authUser);
     if (!permissions.includes(permission)) {
       await reply.code(403).send({ error: 'FORBIDDEN' });
