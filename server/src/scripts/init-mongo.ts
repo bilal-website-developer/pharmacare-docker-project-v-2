@@ -204,6 +204,9 @@ async function ensureIndexes(database: Db): Promise<void> {
       { key: { shopId: 1, soldAt: -1, _id: -1 }, name: 'shop_sale_date' },
       { key: { shopId: 1, customerId: 1, soldAt: -1 }, name: 'shop_customer_sales' },
     ],
+    salePayments: [
+      { key: { shopId: 1, saleId: 1 }, name: 'shop_sale_payments' },
+    ],
     saleReturns: [
       { key: { shopId: 1, returnNumber: 1 }, unique: true, name: 'shop_return_number_unique' },
       { key: { shopId: 1, saleId: 1, status: 1, requestedAt: -1 }, name: 'shop_sale_returns' },

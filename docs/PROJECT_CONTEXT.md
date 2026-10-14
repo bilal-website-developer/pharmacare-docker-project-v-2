@@ -6,7 +6,7 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while the React frontend still uses the legacy Supabase paths. Phases 4–5 catalog, supplier, purchase, and stock APIs are implemented locally; remaining business APIs, frontend cut-over, and runtime verification are pending.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while the React frontend still uses legacy Supabase paths. Catalog, supplier, purchase, stock, POS sale, customer, and sales-history APIs are implemented locally; frontend cut-over and Mongo runtime verification remain pending.
 
 ## How to run
 
@@ -37,7 +37,7 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - Other feature screens in `src/components/` include Dashboard, Reports, Suppliers, Cash Book, Controlled Drugs, Master Data, and print-request administration.
 - `src/utils/`, `src/types/`, `src/data/`: reusable logic, TypeScript domain shapes, and mock pharmacy data.
 - `supabase/migrations/`, `supabase/functions/`, `supabase/baseline/`: database migrations, Edge Functions, and a supplied schema snapshot.
-- `server/`: Fastify/TypeScript API, MongoDB replica-set initializer, auth/user/catalog/purchase/stock routes, transaction repositories, and the first-run super-admin CLI. Sales, returns, customers, cash book, expenses, reports, and print workflows remain unimplemented.
+- `server/`: Fastify/TypeScript API, MongoDB replica-set initializer, auth/user/catalog/purchase/stock/sales/customer routes, transaction repositories, and the first-run super-admin CLI. Returns, cash book, expenses, reports, and print workflows remain unimplemented.
 - `docker/`, `docker-compose.yml`, `Dockerfile`: local Mongo/API/web container setup and Nginx configuration. See `docs/DOCKER.md`.
 - `docs/`: database references, `MASTER_PLAN.md`, `MULTI_SHOP_FULL_PLAN.md`, execution progress, redesign notes, and this context.
 - `scripts/`, `.githooks/`: context generation and commit-hook tooling.
@@ -48,10 +48,10 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - Supabase Auth/Postgres: shared across clients connected to the same configured project. Products, Stock Inventory, and purchase workflows use server RPCs; Suppliers still has direct table reads/writes. Authorization and persistence are not uniform across every screen.
 - Supabase Edge Functions: the `manage-users` function exists; print approval, requester-name listing, audited receipt-only modification, and profile Trash Bin events use database RPCs/Edge Functions.
 - Browser `localStorage`: per-browser/device preferences, saved inventory views, purchase drafts, receipt settings, per-user stock-alert keys seen, and other UI settings. These do not synchronize across counters.
-- Mixed persistence on the legacy frontend: POS/catalog, sales, customer/ledger, and sales-history paths use Supabase RPCs; Dashboard stock/expiry KPIs still use `INITIAL_PRODUCTS`, and Cash Book transactions/expenses remain React in-memory state. The migration branch adds Mongo-backed auth/users, catalog, purchase, and stock APIs; React screens have not been cut over. `medicineUnits` is a separate shop-scoped API collection (not the embedded-unit proposal) for independent CRUD and barcode uniqueness. Purchase and stock transactions are source-implemented but not Mongo-runtime verified.
+- Mixed persistence on the legacy frontend: POS/catalog, sales, customer/ledger, and sales-history paths use Supabase RPCs; Dashboard stock/expiry KPIs still use `INITIAL_PRODUCTS`, and Cash Book transactions/expenses remain React in-memory state. The migration branch adds Mongo-backed auth/users, catalog, purchase, stock, sale, and customer APIs; React screens have not been cut over. `medicineUnits` is a separate shop-scoped API collection (not the embedded-unit proposal) for independent CRUD and barcode uniqueness. Business transactions are source-implemented but not Mongo-runtime verified.
 - Other storage: unknown; no general file/object-storage workflow is established by the checked-in frontend docs.
 - Shared production data behavior depends on Supabase deployment and the live schema, which may differ from checked-in migrations.
-- The local Docker stack contains authenticated MongoDB on a private network and a Fastify API with health, auth, Manage Users, catalog, purchase, and stock routes. It has not been started by the owner; container networking, MongoDB transactions, and runtime behavior remain unverified. The frontend still uses its existing Supabase code.
+- The local Docker stack contains authenticated MongoDB on a private network and a Fastify API with health, auth, Manage Users, catalog, purchase, stock, and sales routes. Container networking and MongoDB transaction/runtime behavior remain unverified. The frontend still uses its existing Supabase code.
 
 ## Roles and permissions
 
@@ -68,7 +68,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - Persisted money columns and calculation fields use integer paisa; `sale_items.discount_percent` is numeric.
 - Batch sale allocation in `src/utils/fefo.ts` uses FEFO: positive eligible stock only, `ACTIVE`/`NEAR_EXPIRY`, expiry today or later, then received date and ID for tie-breaking. It rejects an insufficient allocation rather than returning a partial sale. Server-side enforcement depends on the deployed RPC/schema and must be verified there.
 - Expiry is a stock-batch field, not a medicine/product-master field. Product setup does not require expiry, but every purchase batch currently requires a future expiry date; no-expiry batches are not supported by the schema or sale/alert rules.
-- Mongo Phase 5 refreshes `NEAR_EXPIRY`/`EXPIRED` lazily using UTC calendar dates; `NEAR_EXPIRY` includes expiry through 90 days from today. Phase 5b documents timezone choices but leaves behavior unchanged pending the owner’s decision.
+- The owner selected per-shop IANA timezones, defaulting to `Asia/Karachi`. POS sellability derives “today” from the shop timezone; stock status refresh and stock list/bucket calculations still use UTC and need a follow-up to align them. `NEAR_EXPIRY` includes expiry through 90 days from today.
 - Do not permit negative stock. Verify the server transaction and constraints as well as frontend allocation before relying on this in production.
 - Stock alerts use sellable stock from positive, unexpired (`expiry_date >= current_date`), `ACTIVE`/`NEAR_EXPIRY` batches for active medicines. Alert low/out counts require `min_stock_alert > 0`; the alert RPC returns no cost, MRP, supplier, or cost-derived value and is available to every active, non-deleted profile regardless of module permission. The existing Products `out_of_stock` KPI does not apply the positive-reorder-threshold condition, so its count may exceed alert out counts. Owner-supplied live results show `stock_alerts_summary` exists with anon EXECUTE false/authenticated true; no migration-history result or end-to-end behavior was supplied.
 - Cost and profit/margin are internal data, not Pharmacy Memo print fields. Receipt rendering displays sale amounts/totals and is styled black on white. Do not add cost, purchase price, profit, or margin to customer-facing slips.
@@ -89,11 +89,11 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - Date: 2026-10-13 — Owner reports the corrected `20261013160000_persist_sales_and_returns.sql` migration applied. Owner-shared metadata query verified `SECURITY DEFINER`, `search_path=public`, `anon EXECUTE=false`, and `authenticated EXECUTE=true` for its 13 RPCs and `pos_catalog()`. End-to-end behavior remains unverified. Return totals are capped cumulatively at the sold quantity; multiple partial-return transactions remain possible.
 - Date: 2026-10-12 — Cost access is role-and-permission scoped by `can_view_cost()`; Cashier is always denied, Accountants are read-only, and Manager access requires a relevant module permission. Verify the deployed function and table grants in Supabase.
 - Date: 2026-10-09 — Pharmacy Memo uses a shared sanitized renderer for 58mm/80mm and A4; template and paper preferences remain browser-local because shared settings storage is not implemented.
-- Date: 2026-10-14 — Phase 5b adds Mongo replica-set integration tests and hashed, shop/route-scoped idempotency for authenticated business writes. Login/refresh/logout are excluded; idempotency completion is not atomic with the business transaction, so a post-commit process crash can strand a key as PROCESSING for up to 24 hours. Compose tests could not connect because Mongo is unhealthy (root-user authentication failure); no integration writes occurred. Owner selected per-shop IANA timezones defaulting to `Asia/Karachi`; implementation is deferred and expiry calculations remain UTC meanwhile.
+- Date: 2026-10-14 — Phase 5b adds Mongo replica-set integration tests and hashed, shop/route-scoped idempotency for authenticated business writes. Login/refresh/logout are excluded; idempotency completion is not atomic with the business transaction, so a post-commit process crash can strand a key as PROCESSING for up to 24 hours. Mongo integration remains blocked by the unhealthy Compose database. Owner selected per-shop IANA timezones defaulting to `Asia/Karachi`.
 
 ## Current status
 
-- **Current checkout:** branch `feature/mongo-migration`. Phases 0–5b are implemented locally; Phase 5b adds replica-set integration tests and request idempotency for authenticated business writes. Local source tests do not prove MongoDB behavior; integration results and Docker/runtime proof remain pending. Frontend cut-over is not performed; React screens remain on Supabase.
+- **Current checkout:** branch `feature/mongo-migration`. Phases 0–6 are implemented locally; Phase 6 adds transactional POS sales, customer/khata APIs, and sales history. Local source tests do not prove MongoDB behavior; replica-set integration tests are present but skipped without configured Mongo credentials, and Docker/runtime proof remains pending. Frontend cut-over is not performed; React screens remain on Supabase.
 - **Added; migration owner-reported applied and RPC ACL checked:** Header Stock Alert Bell, accessible alert panel, per-user unseen indicators, permission-aware Products/Stock Inventory navigation, and stock-change refresh events. `stock_alerts_summary(integer)` and its rollback are in `supabase/migrations/20261013140000_stock_alerts_summary.sql` and `supabase/rollback/rollback_20261013140000_stock_alerts_summary.sql`; alert counts/data and UI behavior still need runtime testing.
 - **Verified in history:** The low-stock alert feature is committed as `da7ed5d` on `feature/low-stock-alerts`; it is present in that commit, not missing from the repository history.
 - **Fixed in `b62b547`:** Product-controlled label text is HTML-escaped in generated print markup using the shared receipt helper; hostile markup and quoted attribute payloads are covered by tests. The existing receipt/memo rendering behavior is unchanged.
@@ -150,6 +150,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 ## Changelog
 
 - 2026-10-14 — Implemented Phase 5b replica-set integration tests and hashed idempotency for authenticated business writes; documented auth-route exclusion, crash window, and timezone decision options. Local lint, tests, and build pass; real Mongo integration is blocked by the unhealthy Mongo auth check.
+- 2026-10-14 — Implemented Phase 6 transactional POS sale, FEFO allocation, role/flat discount caps, split tender, customer credit ledger/payment, prescription capture, and sales history. Local lint, full tests, and build pass; seven Mongo integration tests skip because Mongo credentials/runtime are unavailable. Sales use the selected shop timezone; stock expiry queries still use UTC.
 - 2026-10-14 — Implemented Phase 4 catalog/supplier APIs, EAN-13 registry, product CSV import/export, trash/restore, and role-based cost DTO filtering; updated design/tracker for separate `medicineUnits`. Root lint, full tests, and build pass locally; Mongo/Docker runtime and frontend cut-over remain unverified/not performed.
 - 2026-10-14 — Implemented Phase 3 Mongo-backed auth, rotating hashed refresh sessions, lockout, authorization, Manage Users policy, audit entries, and interactive super-admin bootstrap. Runtime remains unverified.
 - 2026-10-14 — Added Phase 2 Docker Compose topology, MongoDB keyfile/replica-set initialization, least-privilege app user/index initialization, Nginx frontend/API proxy, secret generator, and Fastify Mongo health skeleton. Lint, 126 tests, build, API audit, Compose syntax, and PowerShell syntax passed; no container was started. Owner-run Compose/HTTP verification remains pending.
@@ -181,15 +182,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-14T17:27:34.727Z
+Generated at (UTC): 2026-10-14T19:00:56.692Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- docs: record expiry timezone decision
 - feat: add Mongo write idempotency checks
 - feat: implement Mongo stock and purchasing API
 - docs: record Phase 4 catalog API
 - bro
-- fix: complete Mongo auth phase
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
@@ -349,6 +350,7 @@ Test files:
 - server/src/catalog.test.ts
 - server/src/config.test.ts
 - server/src/policy.test.ts
+- server/src/sales.test.ts
 - server/src/stock.test.ts
 - server/src/user-routes.test.ts
 - src/components/inventory/inventoryUiLogic.test.ts

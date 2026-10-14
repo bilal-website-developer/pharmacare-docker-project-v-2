@@ -18,10 +18,11 @@
     "test:auth-routes": "tsx --test src/auth-routes.test.ts",
     "test:catalog": "tsx --test src/catalog.test.ts",
     "test:stock": "tsx --test src/stock.test.ts",
+    "test:sales": "tsx --test src/sales.test.ts",
     "test:policy": "tsx --test src/policy.test.ts",
     "test:user-routes": "tsx --test src/user-routes.test.ts",
     "test:mongo-integration": "node --test integration/mongo.integration.mjs",
-    "test": "npm run test:config && npm run test:app && npm run test:auth-crypto && npm run test:auth-routes && npm run test:catalog && npm run test:stock && npm run test:policy && npm run test:user-routes && npm run test:mongo-integration"
+    "test": "npm run test:config && npm run test:app && npm run test:auth-crypto && npm run test:auth-routes && npm run test:catalog && npm run test:stock && npm run test:sales && npm run test:policy && npm run test:user-routes && npm run test:mongo-integration"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

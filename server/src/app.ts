@@ -15,6 +15,8 @@ import {
   MongoIdempotencyStore,
   type IdempotencyStore,
 } from './idempotency.js';
+import { MongoSalesRepository, type SalesRepository } from './sales-repository.js';
+import { registerSalesRoutes } from './sales-routes.js';
 
 export function createApp(
   mongoClient: MongoClient,
@@ -23,6 +25,7 @@ export function createApp(
   catalogRepository?: CatalogRepository,
   stockRepository?: StockRepository,
   idempotencyStore?: IdempotencyStore,
+  salesRepository?: SalesRepository,
 ): FastifyInstance {
   const resolvedIdempotencyStore = idempotencyStore
     ?? (config ? new MongoIdempotencyStore(mongoClient.db(config.mongoDbName)) : null);
@@ -105,6 +108,13 @@ export function createApp(
     registerStockRoutes(
       app,
       stockRepository ?? new MongoStockRepository(mongoClient, config.mongoDbName),
+      pharmacyRepository,
+      tokenConfig,
+      resolvedIdempotencyStore,
+    );
+    registerSalesRoutes(
+      app,
+      salesRepository ?? new MongoSalesRepository(mongoClient, config.mongoDbName),
       pharmacyRepository,
       tokenConfig,
       resolvedIdempotencyStore,

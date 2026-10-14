@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test, { after, before } from 'node:test';
-import { MongoClient, ObjectId } from 'mongodb';
+import { Long, MongoClient, ObjectId } from 'mongodb';
 import { createAccessToken } from '../dist/auth-crypto.js';
 import { createApp } from '../dist/app.js';
 import { loadConfig } from '../dist/config.js';
 import { MongoStockRepository } from '../dist/stock-repository.js';
+import { MongoSalesRepository } from '../dist/sales-repository.js';
 
 let client;
 let database;
@@ -53,6 +54,9 @@ async function cleanShop(shopId) {
     'purchases',
     'supplierLedger',
     'cashBookEntries',
+    'sales',
+    'salePayments',
+    'customerLedger',
     'auditLogs',
     'trashEvents',
   ]) {
@@ -129,7 +133,7 @@ async function withFixture(run) {
     fullName: 'Integration Manager',
     role: 'manager',
     isActive: true,
-    permissions: ['purchases', 'purchase_history', 'stock_inventory'],
+    permissions: ['purchases', 'purchase_history', 'stock_inventory', 'pos', 'customers', 'sales_history'],
     passwordHash: '$argon2id$integration-only',
     failedLogins: 0,
     lockedUntil: null,
@@ -181,6 +185,138 @@ class InjectedFailureStockRepository extends MongoStockRepository {
     if (stage === this.failAt) throw new Error(`INTEGRATION_INJECTED_FAILURE:${stage}`);
   }
 }
+
+class InjectedFailureSalesRepository extends MongoSalesRepository {
+  failAt = '';
+
+  async transactionCheckpoint(stage) {
+    if (stage === this.failAt) throw new Error(`INTEGRATION_INJECTED_FAILURE:${stage}`);
+  }
+}
+
+function accessToken(actor, config) {
+  return createAccessToken({
+    id: actor._id.toHexString(),
+    shopId: actor.shopId.toHexString(),
+    role: actor.role,
+  }, {
+    accessSecret: config.accessTokenSecret,
+    refreshPepper: config.refreshTokenPepper,
+    accessTokenTtlSeconds: config.accessTokenTtlSeconds,
+    refreshTokenTtlSeconds: config.refreshTokenTtlSeconds,
+  }).token;
+}
+
+function saleInput(medicineId, unitId) {
+  return {
+    items: [{ medicineId: medicineId.toHexString(), unitId: unitId.toHexString(), quantityInUnit: 1 }],
+    discountPaisa: '0',
+    payments: [{ method: 'CASH', amountPaisa: '150' }],
+    amountTenderedPaisa: '150',
+  };
+}
+
+test('Mongo sale transaction rolls back stock and records after an injected mid-transaction failure', { skip: !enabled }, async () => {
+  await withFixture(async ({ shopId, actor, input, medicineId, unitId }) => {
+    const stockRepository = new MongoStockRepository(client, config.mongoDbName);
+    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'));
+    const batch = await database.collection('stockBatches').findOne({ shopId, medicineId });
+    assert.ok(batch);
+
+    const repository = new InjectedFailureSalesRepository(client, config.mongoDbName);
+    repository.failAt = 'sale.after_stock';
+    await assert.rejects(
+      repository.postSale(saleInput(medicineId, unitId), actor, audit(actor, 'sale.completed', 'sale'), new Date()),
+      /INTEGRATION_INJECTED_FAILURE/,
+    );
+    const batchAfter = await database.collection('stockBatches').findOne({ _id: batch._id, shopId });
+    assert.equal(batchAfter.quantityRemainingBaseUnits.toString(), '10');
+    assert.equal(await database.collection('sales').countDocuments({ shopId }), 0);
+    assert.equal(await database.collection('salePayments').countDocuments({ shopId }), 0);
+    assert.equal(await database.collection('stockMovements').countDocuments({ shopId, movementType: 'SALE' }), 0);
+    assert.equal(await database.collection('auditLogs').countDocuments({ shopId, event: 'sale.completed' }), 0);
+  });
+});
+
+test('Mongo credit sales and customer payments keep distinct unique ledger references', { skip: !enabled }, async () => {
+  await withFixture(async ({ shopId, actor, input, medicineId, unitId }) => {
+    const stockRepository = new MongoStockRepository(client, config.mongoDbName);
+    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'));
+    const repository = new MongoSalesRepository(client, config.mongoDbName);
+    const customer = await repository.createCustomer(shopId, actor._id, {
+      name: 'Ledger Integration Customer',
+      phone: '',
+      cnic: null,
+      address: '',
+      creditLimitPaisa: '0',
+    }, audit(actor, 'customer.created', 'customer'));
+    const creditSale = {
+      ...saleInput(medicineId, unitId),
+      customerId: customer._id.toHexString(),
+      payments: [{ method: 'CREDIT', amountPaisa: '150' }],
+      amountTenderedPaisa: '0',
+    };
+    await repository.postSale(creditSale, actor, audit(actor, 'sale.posted', 'sale'), new Date());
+    await repository.postSale(creditSale, actor, audit(actor, 'sale.posted', 'sale'), new Date());
+    await repository.recordCustomerPayment(shopId, customer._id, actor, {
+      amountPaisa: '100',
+      method: 'CASH',
+      note: 'First integration payment',
+    }, audit(actor, 'customer.payment_recorded', 'customer'));
+    await repository.recordCustomerPayment(shopId, customer._id, actor, {
+      amountPaisa: '50',
+      method: 'CARD',
+      note: 'Second integration payment',
+    }, audit(actor, 'customer.payment_recorded', 'customer'));
+
+    const balance = await database.collection('customers').findOne({ _id: customer._id, shopId });
+    assert.equal(balance.currentBalancePaisa.toString(), '150');
+    assert.equal(await database.collection('customerLedger').countDocuments({
+      shopId,
+      customerId: customer._id,
+      entryType: 'INVOICE',
+    }), 2);
+    assert.equal(await database.collection('customerLedger').countDocuments({
+      shopId,
+      customerId: customer._id,
+      entryType: 'PAYMENT',
+    }), 2);
+  });
+});
+
+test('parallel Mongo sales for the last unit allow exactly one complete sale', { skip: !enabled }, async () => {
+  await withFixture(async ({ shopId, actor, input, medicineId, unitId }) => {
+    const stockRepository = new MongoStockRepository(client, config.mongoDbName);
+    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'));
+    const batch = await database.collection('stockBatches').findOne({ shopId, medicineId });
+    assert.ok(batch);
+    await database.collection('stockBatches').updateOne(
+      { _id: batch._id, shopId },
+      { $set: { quantityRemainingBaseUnits: Long.fromInt(1) } },
+    );
+
+    const app = createApp(client, config);
+    const authorization = `Bearer ${accessToken(actor, config)}`;
+    try {
+      await app.ready();
+      const sendSale = () => app.inject({
+        method: 'POST',
+        url: '/api/sales',
+        headers: { authorization, 'idempotency-key': randomUUID() },
+        payload: saleInput(medicineId, unitId),
+      });
+      const results = await Promise.all([sendSale(), sendSale()]);
+      assert.deepEqual(results.map((result) => result.statusCode).sort(), [201, 409]);
+      const remaining = await database.collection('stockBatches').findOne({ _id: batch._id, shopId });
+      assert.equal(remaining.quantityRemainingBaseUnits.toString(), '0');
+      assert.equal(await database.collection('sales').countDocuments({ shopId }), 1);
+      assert.equal(await database.collection('salePayments').countDocuments({ shopId }), 1);
+      assert.equal(await database.collection('stockMovements').countDocuments({ shopId, movementType: 'SALE' }), 1);
+    } finally {
+      await app.close();
+    }
+  });
+});
 
 test('Mongo transactions roll back purchase post and void after mid-transaction failures', { skip: !enabled }, async () => {
   await withFixture(async ({ shopId, actor, input, supplierId }) => {

@@ -6,6 +6,7 @@ export interface ShopRecord {
   slug: string;
   name: string;
   status: 'ACTIVE' | 'SUSPENDED';
+  timeZone?: string;
 }
 
 export interface UserRecord {
