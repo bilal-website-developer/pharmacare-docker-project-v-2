@@ -66,4 +66,4 @@ The current API compares expiry dates using UTC calendar days. Select the busine
 - **Option B — per-shop IANA timezone, default `Asia/Karachi`:** store a validated timezone on each shop and derive “today” for every expiry/status calculation from that shop’s zone; supports future multi-region shops and requires timezone-aware date conversion/tests.
 - **Option C — UTC:** retain the existing UTC calendar boundary and explicitly define all expiry dates as UTC calendar dates; smallest change, but may make a batch appear expired earlier/later than the shop’s local business day.
 
-No timezone option has been selected or implemented. Until a decision is made, source behavior remains UTC.
+**Owner decision:** Option B selected — each shop will use a validated IANA timezone, defaulting to `Asia/Karachi`. This is a decision only; implementation is not part of Phase 5b, and source behavior remains UTC until a separately authorized change.

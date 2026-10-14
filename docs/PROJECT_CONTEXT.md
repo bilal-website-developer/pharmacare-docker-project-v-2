@@ -89,7 +89,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - Date: 2026-10-13 — Owner reports the corrected `20261013160000_persist_sales_and_returns.sql` migration applied. Owner-shared metadata query verified `SECURITY DEFINER`, `search_path=public`, `anon EXECUTE=false`, and `authenticated EXECUTE=true` for its 13 RPCs and `pos_catalog()`. End-to-end behavior remains unverified. Return totals are capped cumulatively at the sold quantity; multiple partial-return transactions remain possible.
 - Date: 2026-10-12 — Cost access is role-and-permission scoped by `can_view_cost()`; Cashier is always denied, Accountants are read-only, and Manager access requires a relevant module permission. Verify the deployed function and table grants in Supabase.
 - Date: 2026-10-09 — Pharmacy Memo uses a shared sanitized renderer for 58mm/80mm and A4; template and paper preferences remain browser-local because shared settings storage is not implemented.
-- Date: 2026-10-14 — Phase 5b adds Mongo replica-set integration tests and hashed, shop/route-scoped idempotency for authenticated business writes. Login/refresh/logout are excluded; idempotency completion is not atomic with the business transaction, so a post-commit process crash can strand a key as PROCESSING for up to 24 hours. Compose tests could not connect because Mongo is unhealthy (root-user authentication failure); no integration writes occurred. Expiry-day/status calculations remain UTC; timezone choices are in `docs/MONGO_MIGRATION.md`.
+- Date: 2026-10-14 — Phase 5b adds Mongo replica-set integration tests and hashed, shop/route-scoped idempotency for authenticated business writes. Login/refresh/logout are excluded; idempotency completion is not atomic with the business transaction, so a post-commit process crash can strand a key as PROCESSING for up to 24 hours. Compose tests could not connect because Mongo is unhealthy (root-user authentication failure); no integration writes occurred. Owner selected per-shop IANA timezones defaulting to `Asia/Karachi`; implementation is deferred and expiry calculations remain UTC meanwhile.
 
 ## Current status
 
@@ -181,15 +181,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-14T14:52:54.104Z
+Generated at (UTC): 2026-10-14T17:27:34.727Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: add Mongo write idempotency checks
 - feat: implement Mongo stock and purchasing API
 - docs: record Phase 4 catalog API
 - bro
 - fix: complete Mongo auth phase
-- :qqww:
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
