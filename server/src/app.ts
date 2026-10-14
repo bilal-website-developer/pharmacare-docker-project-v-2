@@ -10,6 +10,11 @@ import { MongoCatalogRepository, type CatalogRepository } from './catalog-reposi
 import { registerCatalogRoutes } from './catalog-routes.js';
 import { MongoStockRepository, type StockRepository } from './stock-repository.js';
 import { registerStockRoutes } from './stock-routes.js';
+import {
+  finishWriteIdempotency,
+  MongoIdempotencyStore,
+  type IdempotencyStore,
+} from './idempotency.js';
 
 export function createApp(
   mongoClient: MongoClient,
@@ -17,7 +22,10 @@ export function createApp(
   repository?: PharmacyRepository,
   catalogRepository?: CatalogRepository,
   stockRepository?: StockRepository,
+  idempotencyStore?: IdempotencyStore,
 ): FastifyInstance {
+  const resolvedIdempotencyStore = idempotencyStore
+    ?? (config ? new MongoIdempotencyStore(mongoClient.db(config.mongoDbName)) : null);
   const app = Fastify({
     trustProxy: true,
     bodyLimit: 6 * 1024 * 1024,
@@ -27,6 +35,7 @@ export function createApp(
           'req.headers.authorization',
           'req.headers.cookie',
           'req.headers.set-cookie',
+          'req.headers.idempotency-key',
           'req.body.password',
           'req.body.refreshToken',
           'password',
@@ -45,6 +54,17 @@ export function createApp(
   });
   app.decorateRequest('authUser', null);
   app.register(cookie);
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (!request.idempotencyContext || !resolvedIdempotencyStore) return payload;
+    await finishWriteIdempotency(
+      request,
+      reply.statusCode,
+      String(reply.getHeader('content-type') ?? 'application/json'),
+      Buffer.isBuffer(payload) ? payload.toString('utf8') : String(payload),
+      resolvedIdempotencyStore,
+    );
+    return payload;
+  });
 
   app.setErrorHandler((error, request, reply) => {
     request.log.error({
@@ -72,19 +92,22 @@ export function createApp(
       accessTokenTtlSeconds: config.accessTokenTtlSeconds,
       refreshTokenTtlSeconds: config.refreshTokenTtlSeconds,
     };
-    registerAuthRoutes(app, pharmacyRepository, tokenConfig);
-    registerUserRoutes(app, pharmacyRepository, tokenConfig);
+    if (!resolvedIdempotencyStore) throw new Error('Idempotency store is not configured');
+    registerAuthRoutes(app, pharmacyRepository, tokenConfig, resolvedIdempotencyStore);
+    registerUserRoutes(app, pharmacyRepository, tokenConfig, resolvedIdempotencyStore);
     registerCatalogRoutes(
       app,
       catalogRepository ?? new MongoCatalogRepository(mongoClient, config.mongoDbName),
       pharmacyRepository,
       tokenConfig,
+      resolvedIdempotencyStore,
     );
     registerStockRoutes(
       app,
       stockRepository ?? new MongoStockRepository(mongoClient, config.mongoDbName),
       pharmacyRepository,
       tokenConfig,
+      resolvedIdempotencyStore,
     );
   }
 

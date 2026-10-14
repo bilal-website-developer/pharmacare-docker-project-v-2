@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { requireAuth, requirePermission } from './auth-routes.js';
 import { hashPassword } from './auth-crypto.js';
 import type { AuditRecord, PharmacyRepository, UserRecord } from './models.js';
+import type { IdempotencyStore } from './idempotency.js';
 import {
   MODULE_KEYS,
   PERMISSION_KEYS,
@@ -133,10 +134,11 @@ export function registerUserRoutes(
   app: FastifyInstance,
   repository: PharmacyRepository,
   tokenConfig: import('./auth-crypto.js').TokenConfig,
+  idempotencyStore: IdempotencyStore,
 ): void {
   const protectedRoute = {
     preHandler: [
-      requireAuth(repository, tokenConfig),
+      requireAuth(repository, tokenConfig, idempotencyStore),
       requirePermission('manage_users'),
     ],
   };

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
 import { MongoClient } from 'mongodb';
 import { hashPassword } from './auth-crypto.js';
 import { createApp } from './app.js';
 import { MemoryRepository } from './test-support/memory-repository.js';
+import { MemoryIdempotencyStore } from './test-support/memory-idempotency-store.js';
 import { testConfig } from './test-support/test-config.js';
 
 const PASSWORD = 'correct-horse-battery-staple';
@@ -20,7 +22,9 @@ async function setup() {
     passwordHash: await hashPassword(PASSWORD),
   });
   const client = new MongoClient('mongodb://127.0.0.1:1');
-  const app = createApp(client, testConfig, repository);
+  const app = createApp(
+    client, testConfig, repository, undefined, undefined, new MemoryIdempotencyStore(),
+  );
   await app.ready();
   return { app, client, repository, shop, user };
 }
@@ -175,6 +179,7 @@ test('logout revokes the refresh family and clears the secure cookie', async () 
       url: '/api/auth/logout',
       headers: {
         authorization: `Bearer ${login.json().accessToken}`,
+        'idempotency-key': randomUUID(),
         cookie: `pharma_refresh=${token}`,
       },
     });

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MongoClient } from 'mongodb';
+import { MongoClient, ObjectId } from 'mongodb';
 import { createAccessToken } from './auth-crypto.js';
 import { createApp } from './app.js';
 import type { UserRecord } from './models.js';
 import { MemoryRepository } from './test-support/memory-repository.js';
+import { MemoryIdempotencyStore } from './test-support/memory-idempotency-store.js';
 import { testConfig } from './test-support/test-config.js';
 
 function bearer(user: UserRecord, shopId = user.shopId.toHexString()): string {
@@ -22,9 +23,16 @@ function bearer(user: UserRecord, shopId = user.shopId.toHexString()): string {
 
 async function makeApp(repository: MemoryRepository) {
   const client = new MongoClient('mongodb://127.0.0.1:1');
-  const app = createApp(client, testConfig, repository);
+  const app = createApp(client, testConfig, repository, undefined, undefined, new MemoryIdempotencyStore());
   await app.ready();
   return { app, client };
+}
+
+function headers(user: UserRecord) {
+  return {
+    authorization: `Bearer ${bearer(user)}`,
+    'idempotency-key': new ObjectId().toHexString(),
+  };
 }
 
 test('user list returns policy capabilities and never returns password or lockout internals', async () => {
@@ -48,7 +56,7 @@ test('user list returns policy capabilities and never returns password or lockou
     const response = await app.inject({
       method: 'GET',
       url: '/api/users',
-      headers: { authorization: `Bearer ${bearer(manager)}` },
+      headers: headers(manager),
     });
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.json().assignable_roles, ['cashier', 'manager', 'accountant']);
@@ -83,7 +91,7 @@ test('admin cannot manage another admin and only Super Admin can change admin ac
     const response = await app.inject({
       method: 'DELETE',
       url: `/api/users/${otherAdmin._id.toHexString()}`,
-      headers: { authorization: `Bearer ${bearer(admin)}` },
+      headers: headers(admin),
     });
     assert.equal(response.statusCode, 403);
   } finally {
@@ -114,7 +122,7 @@ test('permission-gated manager cannot grant permissions not held and Zod rejects
     const denied = await app.inject({
       method: 'POST',
       url: '/api/users',
-      headers: { authorization: `Bearer ${bearer(manager)}` },
+      headers: headers(manager),
       payload: body,
     });
     assert.equal(denied.statusCode, 403);
@@ -122,7 +130,7 @@ test('permission-gated manager cannot grant permissions not held and Zod rejects
     const malformed = await app.inject({
       method: 'POST',
       url: '/api/users',
-      headers: { authorization: `Bearer ${bearer(manager)}` },
+      headers: headers(manager),
       payload: { ...body, username: { $ne: null } },
     });
     assert.equal(malformed.statusCode, 400);
@@ -153,7 +161,7 @@ test('nobody can change their own role and final active admin cannot be deleted'
     const selfEdit = await app.inject({
       method: 'PATCH',
       url: `/api/users/${root._id.toHexString()}`,
-      headers: { authorization: `Bearer ${bearer(root)}` },
+      headers: headers(root),
       payload: {
         username: root.username,
         email: root.email,
@@ -168,7 +176,7 @@ test('nobody can change their own role and final active admin cannot be deleted'
     const deleteFinalAdmin = await app.inject({
       method: 'DELETE',
       url: `/api/users/${admin._id.toHexString()}`,
-      headers: { authorization: `Bearer ${bearer(root)}` },
+      headers: headers(root),
     });
     assert.equal(deleteFinalAdmin.statusCode, 403);
     assert.equal(admin.deletedAt, null);
@@ -199,7 +207,7 @@ test('cross-shop target user is indistinguishable from a missing user', async ()
     const response = await app.inject({
       method: 'DELETE',
       url: `/api/users/${foreignUser._id.toHexString()}`,
-      headers: { authorization: `Bearer ${bearer(manager)}` },
+      headers: headers(manager),
     });
     assert.equal(response.statusCode, 404);
     assert.deepEqual(response.json(), { error: 'NOT_FOUND' });
@@ -224,7 +232,7 @@ test('successful create stores only an Argon2id password hash and appends an aud
     const response = await app.inject({
       method: 'POST',
       url: '/api/users',
-      headers: { authorization: `Bearer ${bearer(admin)}` },
+      headers: headers(admin),
       payload: {
         username: 'new-cashier',
         email: 'new@example.test',
@@ -281,7 +289,7 @@ test('authenticated user without Manage Users permission is denied user administ
     const response = await app.inject({
       method: 'GET',
       url: '/api/users',
-      headers: { authorization: `Bearer ${bearer(cashier)}` },
+      headers: headers(cashier),
     });
     assert.equal(response.statusCode, 403);
     assert.deepEqual(response.json(), { error: 'FORBIDDEN' });

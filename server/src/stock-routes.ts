@@ -5,6 +5,7 @@ import type { AuditRecord, PharmacyRepository, UserRecord } from './models.js';
 import { canViewCost } from './catalog-domain.js';
 import { requireAuth, requirePermission, requireRole } from './auth-routes.js';
 import type { TokenConfig } from './auth-crypto.js';
+import type { IdempotencyStore } from './idempotency.js';
 import {
   adjustStockSchema,
   objectId,
@@ -200,11 +201,12 @@ export function registerStockRoutes(
   repository: StockRepository,
   authRepository: PharmacyRepository,
   tokenConfig: TokenConfig,
+  idempotencyStore: IdempotencyStore,
 ): void {
-  const purchasePreHandler = [requireAuth(authRepository, tokenConfig), requirePermission('purchases')];
-  const historyPreHandler = [requireAuth(authRepository, tokenConfig), requirePermission('purchase_history')];
-  const stockPreHandler = [requireAuth(authRepository, tokenConfig), requirePermission('stock_inventory')];
-  const stockAlertPreHandler = [requireAuth(authRepository, tokenConfig), requirePermission('stock_alerts')];
+  const purchasePreHandler = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('purchases')];
+  const historyPreHandler = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('purchase_history')];
+  const stockPreHandler = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('stock_inventory')];
+  const stockAlertPreHandler = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('stock_alerts')];
 
   app.get('/api/purchases/catalog', { preHandler: purchasePreHandler }, async (request, reply) => {
     const caller = callerFor(request, reply);
@@ -273,7 +275,7 @@ export function registerStockRoutes(
 
   app.post('/api/purchases/:id/void', {
     preHandler: [
-      requireAuth(authRepository, tokenConfig),
+      requireAuth(authRepository, tokenConfig, idempotencyStore),
       requireRole('admin', 'super_admin'),
       requirePermission('purchases'),
     ],

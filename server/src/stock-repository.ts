@@ -128,6 +128,8 @@ export class MongoStockRepository implements StockRepository {
     return this.database.collection<PurchaseRecord>('purchases');
   }
 
+  protected async transactionCheckpoint(_stage: string): Promise<void> {}
+
   async activePurchaseCatalog(shopId: ObjectId, canViewCost: boolean): Promise<{
     items: Record<string, unknown>[];
     suppliers: Array<{ id: string; name: string; contact: string }>;
@@ -375,14 +377,18 @@ export class MongoStockRepository implements StockRepository {
 
         const batchCollection = this.batchCollection();
         await this.purchaseCollection().insertOne(purchase, { session });
+        await this.transactionCheckpoint('purchase.after_purchase');
         await batchCollection.insertMany(batches, { session });
+        await this.transactionCheckpoint('purchase.after_batches');
         await this.database.collection<StockMovementRecord>('stockMovements').insertMany(movements, { session });
+        await this.transactionCheckpoint('purchase.after_movements');
         const supplierUpdate = await this.database.collection('suppliers').updateOne(
           { _id: supplier._id, shopId: actor.shopId, isActive: true, deletedAt: null },
           { $inc: { payableBalancePaisa: requireLong(payableDelta, 'supplier balance') } },
           { session },
         );
         if (supplierUpdate.matchedCount !== 1) throw new Error('SUPPLIER_CHANGED_DURING_PURCHASE');
+        await this.transactionCheckpoint('purchase.after_supplier_balance');
         const supplierAfter = await this.database.collection('suppliers').findOne(
           { _id: supplier._id, shopId: actor.shopId },
           { session },
@@ -400,6 +406,7 @@ export class MongoStockRepository implements StockRepository {
           createdAt: now,
           note: `Purchase ${purchase.purchaseNumber}`,
         }, { session });
+        await this.transactionCheckpoint('purchase.after_supplier_ledger');
         if (paid > 0n) {
           await this.database.collection('cashBookEntries').insertOne({
             shopId: actor.shopId,
@@ -413,6 +420,7 @@ export class MongoStockRepository implements StockRepository {
             createdAt: now,
           }, { session });
         }
+        await this.transactionCheckpoint('purchase.after_cash_book');
         await this.database.collection<AuditRecord>('auditLogs').insertOne({
           ...audit,
           event: 'purchase.posted',
@@ -426,6 +434,7 @@ export class MongoStockRepository implements StockRepository {
           },
           occurredAt: now,
         }, { session });
+        await this.transactionCheckpoint('purchase.after_audit');
         posted = purchase;
       });
       if (!posted) throw new Error('PURCHASE_TRANSACTION_DID_NOT_COMPLETE');
@@ -500,6 +509,7 @@ export class MongoStockRepository implements StockRepository {
             createdAt: now,
           }, { session });
         }
+        await this.transactionCheckpoint('purchase_void.after_batches');
         const originalLedger = await this.database.collection('supplierLedger').findOne(
           { shopId, supplierId: purchase.supplierId, referenceType: 'PURCHASE', referenceId: purchaseId },
           { session },
@@ -531,6 +541,7 @@ export class MongoStockRepository implements StockRepository {
           createdAt: now,
           note: `Void ${purchase.purchaseNumber}: ${reason.trim()}`,
         }, { session });
+        await this.transactionCheckpoint('purchase_void.after_supplier_ledger');
         if (purchase.paidPaisa.greaterThan(Long.ZERO)) {
           await this.database.collection('cashBookEntries').insertOne({
             shopId,
@@ -544,12 +555,14 @@ export class MongoStockRepository implements StockRepository {
             createdAt: now,
           }, { session });
         }
+        await this.transactionCheckpoint('purchase_void.after_cash_book');
         const result = await this.purchaseCollection().updateOne(
           { _id: purchaseId, shopId, status: 'posted' },
           { $set: { status: 'void', voidReason: reason.trim(), voidedAt: now, voidedBy: actor._id } },
           { session },
         );
         if (result.modifiedCount !== 1) throw new Error('PURCHASE_CHANGED_CONCURRENTLY');
+        await this.transactionCheckpoint('purchase_void.after_purchase_update');
         const after = { ...purchase, status: 'void' as const, voidReason: reason.trim(), voidedAt: now, voidedBy: actor._id };
         await this.database.collection<AuditRecord>('auditLogs').insertOne({
           ...audit,
@@ -560,6 +573,7 @@ export class MongoStockRepository implements StockRepository {
           after: { status: after.status, reason: after.voidReason },
           occurredAt: now,
         }, { session });
+        await this.transactionCheckpoint('purchase_void.after_audit');
         voided = after;
       });
       return voided;
@@ -956,6 +970,7 @@ export class MongoStockRepository implements StockRepository {
           { session },
         );
         if (result.modifiedCount !== 1) throw new Error('BATCH_CHANGED_CONCURRENTLY');
+        await this.transactionCheckpoint('stock_adjustment.after_batch');
         const after = { ...before, quantityRemainingBaseUnits: nextQuantity, status, updatedAt: now };
         await this.database.collection<StockMovementRecord>('stockMovements').insertOne({
           _id: new ObjectId(),
@@ -970,6 +985,7 @@ export class MongoStockRepository implements StockRepository {
           actorId: actor._id,
           createdAt: now,
         }, { session });
+        await this.transactionCheckpoint('stock_adjustment.after_movement');
         await this.database.collection<AuditRecord>('auditLogs').insertOne({
           ...audit,
           event: 'stock.adjusted',
@@ -979,6 +995,7 @@ export class MongoStockRepository implements StockRepository {
           after: { quantityRemainingBaseUnits: nextQuantity.toString(), status },
           occurredAt: now,
         }, { session });
+        await this.transactionCheckpoint('stock_adjustment.after_audit');
         updated = after;
       });
       return updated;
@@ -1009,6 +1026,7 @@ export class MongoStockRepository implements StockRepository {
           { session },
         );
         if (update.modifiedCount !== 1) throw new Error('BATCH_CHANGED_CONCURRENTLY');
+        await this.transactionCheckpoint('stock_write_off.after_batch');
         await this.database.collection<StockMovementRecord>('stockMovements').insertOne({
           _id: new ObjectId(),
           shopId,
@@ -1022,6 +1040,7 @@ export class MongoStockRepository implements StockRepository {
           actorId: actor._id,
           createdAt: now,
         }, { session });
+        await this.transactionCheckpoint('stock_write_off.after_movement');
         await this.database.collection<AuditRecord>('auditLogs').insertOne({
           ...audit,
           event: 'stock_batch.write_off',
@@ -1034,6 +1053,7 @@ export class MongoStockRepository implements StockRepository {
           after: { quantityRemainingBaseUnits: '0', status: 'SOLD_OUT', reason: 'expired' },
           occurredAt: now,
         }, { session });
+        await this.transactionCheckpoint('stock_write_off.after_audit');
         outcome = {
           before: before.quantityRemainingBaseUnits,
           batch: { ...before, quantityRemainingBaseUnits: Long.ZERO, status: 'SOLD_OUT', updatedAt: now },

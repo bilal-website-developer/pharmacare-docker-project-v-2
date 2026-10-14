@@ -4,6 +4,7 @@ import { Long, MongoClient, ObjectId } from 'mongodb';
 import { createAccessToken } from './auth-crypto.js';
 import { createApp } from './app.js';
 import { MemoryCatalogRepository } from './test-support/memory-catalog-repository.js';
+import { MemoryIdempotencyStore } from './test-support/memory-idempotency-store.js';
 import { MemoryRepository } from './test-support/memory-repository.js';
 import { MemoryStockRepository } from './test-support/memory-stock-repository.js';
 import { testConfig } from './test-support/test-config.js';
@@ -24,7 +25,10 @@ function bearer(user: UserRecord): string {
 }
 
 function headers(user: UserRecord) {
-  return { authorization: `Bearer ${bearer(user)}` };
+  return {
+    authorization: `Bearer ${bearer(user)}`,
+    'idempotency-key': new ObjectId().toHexString(),
+  };
 }
 
 function dateFromToday(days: number): string {
@@ -64,9 +68,12 @@ async function setup() {
   const supplierId = stock.seedSupplier(shop._id);
   const medicine = stock.seedMedicine(shop._id, 'Paracetamol', 10);
   const client = new MongoClient('mongodb://127.0.0.1:1');
-  const app = createApp(client, testConfig, auth, new MemoryCatalogRepository(), stock);
+  const idempotency = new MemoryIdempotencyStore();
+  const app = createApp(
+    client, testConfig, auth, new MemoryCatalogRepository(), stock, idempotency,
+  );
   await app.ready();
-  return { app, client, auth, shop, admin, manager, cashier, accountant, stock, supplierId, medicine };
+  return { app, client, auth, shop, admin, manager, cashier, accountant, stock, supplierId, medicine, idempotency };
 }
 
 function purchaseBody(
@@ -182,6 +189,44 @@ test('purchase transaction rolls back every staged write after an injected mid-t
     });
     assert.equal(successful.statusCode, 201, successful.body);
     assert.equal(successful.json().purchaseNumber, 'PR-000001');
+  } finally {
+    await app.close();
+    await client.close();
+  }
+});
+
+test('purchase idempotency replays saved response and rejects the same key with changed input', async () => {
+  const { app, client, manager, stock, supplierId, medicine } = await setup();
+  try {
+    const key = new ObjectId().toHexString();
+    const payload = purchaseBody(supplierId, medicine.medicineId, medicine.unitId);
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/purchases',
+      headers: { ...headers(manager), 'idempotency-key': key },
+      payload,
+    });
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/api/purchases',
+      headers: { ...headers(manager), 'idempotency-key': key },
+      payload,
+    });
+    assert.equal(first.statusCode, 201);
+    assert.equal(replay.statusCode, 201);
+    assert.deepEqual(replay.json(), first.json());
+    assert.equal(stock.purchases.length, 1);
+    assert.equal(stock.batches.length, 1);
+
+    const conflict = await app.inject({
+      method: 'POST',
+      url: '/api/purchases',
+      headers: { ...headers(manager), 'idempotency-key': key },
+      payload: purchaseBody(supplierId, medicine.medicineId, medicine.unitId, { notes: 'Different input' }),
+    });
+    assert.equal(conflict.statusCode, 409);
+    assert.equal(conflict.json().error, 'IDEMPOTENCY_KEY_REUSED');
+    assert.equal(stock.purchases.length, 1);
   } finally {
     await app.close();
     await client.close();

@@ -10,6 +10,7 @@ import {
 } from './catalog-domain.js';
 import type { UserRecord } from './models.js';
 import { MemoryCatalogRepository } from './test-support/memory-catalog-repository.js';
+import { MemoryIdempotencyStore } from './test-support/memory-idempotency-store.js';
 import { MemoryRepository } from './test-support/memory-repository.js';
 import { testConfig } from './test-support/test-config.js';
 
@@ -49,13 +50,16 @@ async function setup() {
   });
   const catalog = new MemoryCatalogRepository();
   const client = new MongoClient('mongodb://127.0.0.1:1');
-  const app = createApp(client, testConfig, auth, catalog);
+  const app = createApp(client, testConfig, auth, catalog, undefined, new MemoryIdempotencyStore());
   await app.ready();
   return { app, client, auth, catalog, shop, admin, cashier, manager };
 }
 
 function headers(user: UserRecord) {
-  return { authorization: `Bearer ${bearer(user)}` };
+  return {
+    authorization: `Bearer ${bearer(user)}`,
+    'idempotency-key': new ObjectId().toHexString(),
+  };
 }
 
 async function createCategoryAndBrand(

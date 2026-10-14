@@ -111,6 +111,17 @@ async function ensureAppUser(
 }
 
 async function ensureIndexes(database: Db): Promise<void> {
+  const idempotencyCollectionExists = await database
+    .listCollections({ name: 'idempotencyRecords' }, { nameOnly: true })
+    .hasNext();
+  if (idempotencyCollectionExists) {
+    const idempotencyCollection = database.collection('idempotencyRecords');
+    const existingIndexes = await idempotencyCollection.listIndexes().toArray();
+    if (existingIndexes.some((index) => index.name === 'shop_idempotency_unique')) {
+      await idempotencyCollection.dropIndex('shop_idempotency_unique');
+    }
+  }
+
   const indexes: Record<string, IndexDescription[]> = {
     shops: [
       { key: { slug: 1 }, unique: true, name: 'shop_slug_unique' },
@@ -240,9 +251,9 @@ async function ensureIndexes(database: Db): Promise<void> {
     ],
     idempotencyRecords: [
       {
-        key: { shopId: 1, userId: 1, key: 1, route: 1 },
+        key: { shopId: 1, route: 1, keyHash: 1 },
         unique: true,
-        name: 'shop_idempotency_unique',
+        name: 'shop_route_idempotency_unique',
       },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'idempotency_expiry_ttl' },
     ],

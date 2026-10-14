@@ -27,6 +27,7 @@ import {
 import { requireAuth, requirePermission, requireRole } from './auth-routes.js';
 import type { CatalogListOptions, CatalogRepository } from './catalog-repository.js';
 import type { TokenConfig } from './auth-crypto.js';
+import type { IdempotencyStore } from './idempotency.js';
 
 const idSchema = z.string().regex(/^[a-f\d]{24}$/i);
 const medicineCreateSchema = medicineInputSchema.extend({
@@ -207,12 +208,13 @@ function registerNamedRoutes(
   repository: CatalogRepository,
   authRepository: PharmacyRepository,
   tokenConfig: TokenConfig,
+  idempotencyStore: IdempotencyStore,
   collection: NamedResource,
   permission: 'categories',
 ): void {
   const entityType: CatalogEntityType = collection === 'categories' ? 'category' : 'brand';
   const path = collection;
-  const preHandler = [requireAuth(authRepository, tokenConfig), requirePermission(permission)];
+  const preHandler = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission(permission)];
 
   app.get(`/api/${path}`, { preHandler }, async (request, reply) => {
     const caller = requiredCaller(request, reply);
@@ -360,12 +362,13 @@ export function registerCatalogRoutes(
   repository: CatalogRepository,
   authRepository: PharmacyRepository,
   tokenConfig: TokenConfig,
+  idempotencyStore: IdempotencyStore,
 ): void {
-  const productsPreHandler = [requireAuth(authRepository, tokenConfig), requirePermission('products')];
-  const suppliersPreHandler = [requireAuth(authRepository, tokenConfig), requirePermission('suppliers')];
+  const productsPreHandler = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('products')];
+  const suppliersPreHandler = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('suppliers')];
 
-  registerNamedRoutes(app, repository, authRepository, tokenConfig, 'categories', 'categories');
-  registerNamedRoutes(app, repository, authRepository, tokenConfig, 'brands', 'categories');
+  registerNamedRoutes(app, repository, authRepository, tokenConfig, idempotencyStore, 'categories', 'categories');
+  registerNamedRoutes(app, repository, authRepository, tokenConfig, idempotencyStore, 'brands', 'categories');
 
   app.get('/api/suppliers', { preHandler: suppliersPreHandler }, async (request, reply) => {
     const caller = requiredCaller(request, reply);
@@ -937,7 +940,7 @@ export function registerCatalogRoutes(
 
   app.get('/api/trash', {
     preHandler: [
-      requireAuth(authRepository, tokenConfig),
+      requireAuth(authRepository, tokenConfig, idempotencyStore),
       requireRole('admin', 'super_admin'),
       requirePermission('products'),
     ],

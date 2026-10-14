@@ -14,6 +14,12 @@ import {
 } from './auth-crypto.js';
 import type { AuditRecord, PharmacyRepository, RefreshSessionRecord, UserRecord } from './models.js';
 import { MODULE_KEYS, permissionSchema, type PermissionKey, type Role } from './permissions.js';
+import {
+  beginWriteIdempotency,
+  requestUsesIdempotency,
+  validateIdempotencyHeader,
+  type IdempotencyStore,
+} from './idempotency.js';
 
 const loginSchema = z.object({
   shopSlug: z.string().trim().min(1).max(63).regex(/^[a-zA-Z0-9-]+$/),
@@ -127,17 +133,35 @@ async function authenticateRequest(
 export function requireAuth(
   repository: PharmacyRepository,
   tokenConfig: TokenConfig,
+  idempotencyStore?: IdempotencyStore,
 ): (request: FastifyRequest, reply: FastifyReply) => Promise<void> {
   return async (request, reply) => {
+    if (reply.sent) return;
     request.authUser = await authenticateRequest(request, repository, tokenConfig);
     if (!request.authUser) {
       await reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      return;
     }
+    if (!requestUsesIdempotency(request)) return;
+    const validationError = validateIdempotencyHeader(request);
+    if (validationError) {
+      await reply.code(400).send({ error: validationError });
+      return;
+    }
+    if (!idempotencyStore) throw new Error('Idempotency store is not configured');
+    const shouldContinue = await beginWriteIdempotency(
+      request,
+      reply,
+      request.authUser.shopId,
+      idempotencyStore,
+    );
+    if (!shouldContinue) return;
   };
 }
 
 export function requireRole(...roles: Role[]) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (reply.sent) return;
     if (!request.authUser) {
       await reply.code(401).send({ error: 'UNAUTHENTICATED' });
       return;
@@ -150,6 +174,7 @@ export function requireRole(...roles: Role[]) {
 
 export function requirePermission(permission: PermissionKey) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (reply.sent) return;
     if (!request.authUser) {
       await reply.code(401).send({ error: 'UNAUTHENTICATED' });
       return;
@@ -173,6 +198,7 @@ export function registerAuthRoutes(
   app: FastifyInstance,
   repository: PharmacyRepository,
   tokenConfig: TokenConfig,
+  idempotencyStore: IdempotencyStore,
 ): void {
   app.post('/api/auth/login', async (request, reply) => {
     const parsed = loginSchema.safeParse(request.body);
@@ -317,7 +343,7 @@ export function registerAuthRoutes(
   });
 
   app.post('/api/auth/logout', {
-    preHandler: requireAuth(repository, tokenConfig),
+    preHandler: requireAuth(repository, tokenConfig, idempotencyStore),
   }, async (request, reply) => {
     const user = request.authUser;
     if (!user) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
@@ -343,7 +369,7 @@ export function registerAuthRoutes(
   });
 
   app.get('/api/auth/me', {
-    preHandler: requireAuth(repository, tokenConfig),
+    preHandler: requireAuth(repository, tokenConfig, idempotencyStore),
   }, async (request, reply) => {
     const user = request.authUser;
     if (!user) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
