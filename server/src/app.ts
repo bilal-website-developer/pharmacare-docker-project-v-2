@@ -8,12 +8,15 @@ import type { AppConfig } from './config.js';
 import { registerUserRoutes } from './user-routes.js';
 import { MongoCatalogRepository, type CatalogRepository } from './catalog-repository.js';
 import { registerCatalogRoutes } from './catalog-routes.js';
+import { MongoStockRepository, type StockRepository } from './stock-repository.js';
+import { registerStockRoutes } from './stock-routes.js';
 
 export function createApp(
   mongoClient: MongoClient,
   config?: AppConfig,
   repository?: PharmacyRepository,
   catalogRepository?: CatalogRepository,
+  stockRepository?: StockRepository,
 ): FastifyInstance {
   const app = Fastify({
     trustProxy: true,
@@ -74,6 +77,12 @@ export function createApp(
     registerCatalogRoutes(
       app,
       catalogRepository ?? new MongoCatalogRepository(mongoClient, config.mongoDbName),
+      pharmacyRepository,
+      tokenConfig,
+    );
+    registerStockRoutes(
+      app,
+      stockRepository ?? new MongoStockRepository(mongoClient, config.mongoDbName),
       pharmacyRepository,
       tokenConfig,
     );

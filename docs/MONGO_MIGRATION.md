@@ -11,7 +11,8 @@ This file tracks migration phase deliverables and verification. It does not auth
 | 2 | Docker/API foundation | Implemented locally; awaiting owner-run Compose verification | At Phase 2 completion this provided the health-only Fastify skeleton. Owner-run Compose verification is still pending. |
 | 3 | Authentication and Manage Users API | Implemented locally; awaiting owner-run Docker/runtime verification | Auth/session routes, authorization middleware, policy-aligned user routes, bootstrap CLI, and tests are in `server/`. This does not cut over the frontend or implement business modules. |
 | 4 | Catalog, product, and supplier API | Implemented locally; tests/build pass | Mongo/Docker runtime and live route verification are not performed. Route tests use in-memory repositories. |
-| 5+ | Remaining business API implementation | Not started | Preserve the Phase 2 Docker verification gate; implement transactions for every multi-document business write. |
+| 5 | Purchases and stock API | Implemented locally; source tests pass, owner runtime proof pending | Purchase posting/void, stock queries, adjustments, write-off, alert summary, and lazy expiry status refresh are in `server/`; Mongo transaction/runtime behavior is not verified. |
+| 6+ | Remaining business API implementation | Not started | Preserve the Phase 2 Docker verification gate; implement transactions for every multi-document business write. |
 | 12 | Cut-over and Supabase cleanup | Blocked on explicit approval after all manual tests pass | Never delete `supabase/` or migrations; cut-over plan requires owner approval. |
 
 ## Phase 1 verification and open items
@@ -42,3 +43,12 @@ This file tracks migration phase deliverables and verification. It does not auth
 - Mongo index initialization now includes per-shop normalized medicine-name and medicine-unit-name uniqueness. `medicineUnits` is a separate collection (rather than the embedded units in the original proposal) to support requested independent CRUD, barcode ownership, and per-medicine uniqueness; see `MONGO_DESIGN.md`.
 - Local root lint, complete tests, and frontend/API build pass. The focused catalog suite covers input validation, duplicate handling, cost DTO/CSV filtering, CSV row errors, soft-delete/restore, and concurrent barcode assignment. Frontend build retains the existing `__dirname` and large-chunk warnings.
 - No MongoDB container, live database, or Docker Compose runtime was used. Transaction behavior, installed indexes, and network/runtime behavior remain unverified pending owner-run Docker checks; this phase does not cut over the Supabase frontend.
+
+## Phase 5 status
+
+- Implemented purchase catalog/history/detail, purchase posting and guarded voiding, stock overview/expiry buckets/batches/adjustment log, stock adjustment, expired-batch write-off, and permission-gated stock-alert summaries. Business reads use the authenticated user's shop ID; DTOs are allowlisted, and cost-bearing fields are omitted unless role-and-permission policy allows them.
+- Mongo purchase, void, adjustment, and write-off mutations use one Mongo session transaction for their stock/supplier/ledger/cash-book/audit writes. Purchase numbering uses an atomic per-shop counter in that transaction; sequential uniqueness is promised, not gap-free numbering. Purchase void is restricted to Admin/Super Admin with `purchases` and is rejected after any post-receipt movement or quantity change.
+- Stock statuses are lazily refreshed on stock overview, expiry-bucket, and batch reads. The current expiry-day boundary is UTC; `NEAR_EXPIRY` means through 90 days inclusive. Purchase expiry must be after the purchase date; negative stock and writing off non-expired batches are rejected.
+- Local tests use the in-memory repository, including injected mid-write failure/rollback simulation. They do not exercise a Mongo replica set or prove server transaction rollback, installed indexes, or API/container runtime behavior. Docker was not started and no live database was accessed. Owner-run Docker/HTTP proof remains required; Supabase frontend paths are unchanged.
+- Root `npm run lint`, `npm test`, and `npm run build` passed. The build retains existing Vite `__dirname` and large-chunk warnings.
+- Phase 5 does not yet persist request idempotency records despite the broader Phase 1 design contract; this remains a known implementation gap to resolve before production mutations are exposed.

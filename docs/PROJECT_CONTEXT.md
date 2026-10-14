@@ -6,7 +6,7 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while the React frontend still uses the legacy Supabase paths. Phase 4 catalog/supplier API code is implemented locally; remaining business APIs, frontend cut-over, and runtime verification are pending.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while the React frontend still uses the legacy Supabase paths. Phases 4–5 catalog, supplier, purchase, and stock APIs are implemented locally; remaining business APIs, frontend cut-over, and runtime verification are pending.
 
 ## How to run
 
@@ -22,7 +22,7 @@ npm run build
 
 Vite serves on port 3000. `npm test` runs the project's registered unit tests; see the generated test-file list below for coverage.
 
-The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requires Docker Desktop. MongoDB currently backs the API's authentication and user-management routes only; the frontend still uses the existing Supabase paths.
+The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requires Docker Desktop. MongoDB backs API auth, user, catalog, purchase, and stock routes; the frontend still uses the existing Supabase paths.
 
 ## Folder map
 
@@ -37,7 +37,7 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - Other feature screens in `src/components/` include Dashboard, Reports, Suppliers, Cash Book, Controlled Drugs, Master Data, and print-request administration.
 - `src/utils/`, `src/types/`, `src/data/`: reusable logic, TypeScript domain shapes, and mock pharmacy data.
 - `supabase/migrations/`, `supabase/functions/`, `supabase/baseline/`: database migrations, Edge Functions, and a supplied schema snapshot.
-- `server/`: Fastify/TypeScript API, MongoDB replica-set initializer, authentication/session routes, authorization helpers, Manage Users routes, and the first-run super-admin CLI. Business modules beyond auth/user management remain unimplemented.
+- `server/`: Fastify/TypeScript API, MongoDB replica-set initializer, auth/user/catalog/purchase/stock routes, transaction repositories, and the first-run super-admin CLI. Sales, returns, customers, cash book, expenses, reports, and print workflows remain unimplemented.
 - `docker/`, `docker-compose.yml`, `Dockerfile`: local Mongo/API/web container setup and Nginx configuration. See `docs/DOCKER.md`.
 - `docs/`: database references, `MASTER_PLAN.md`, `MULTI_SHOP_FULL_PLAN.md`, execution progress, redesign notes, and this context.
 - `scripts/`, `.githooks/`: context generation and commit-hook tooling.
@@ -48,10 +48,10 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - Supabase Auth/Postgres: shared across clients connected to the same configured project. Products, Stock Inventory, and purchase workflows use server RPCs; Suppliers still has direct table reads/writes. Authorization and persistence are not uniform across every screen.
 - Supabase Edge Functions: the `manage-users` function exists; print approval, requester-name listing, audited receipt-only modification, and profile Trash Bin events use database RPCs/Edge Functions.
 - Browser `localStorage`: per-browser/device preferences, saved inventory views, purchase drafts, receipt settings, per-user stock-alert keys seen, and other UI settings. These do not synchronize across counters.
-- Mixed persistence on the legacy frontend: POS/catalog, sales, customer/ledger, and sales-history paths use Supabase RPCs; Dashboard stock/expiry KPIs still use `INITIAL_PRODUCTS`, and Cash Book transactions/expenses remain React in-memory state. The migration branch adds Mongo-backed auth/users and catalog APIs; React screens have not been cut over. `medicineUnits` is a separate shop-scoped API collection (not the embedded-unit proposal) for independent CRUD and barcode uniqueness.
+- Mixed persistence on the legacy frontend: POS/catalog, sales, customer/ledger, and sales-history paths use Supabase RPCs; Dashboard stock/expiry KPIs still use `INITIAL_PRODUCTS`, and Cash Book transactions/expenses remain React in-memory state. The migration branch adds Mongo-backed auth/users, catalog, purchase, and stock APIs; React screens have not been cut over. `medicineUnits` is a separate shop-scoped API collection (not the embedded-unit proposal) for independent CRUD and barcode uniqueness. Purchase and stock transactions are source-implemented but not Mongo-runtime verified.
 - Other storage: unknown; no general file/object-storage workflow is established by the checked-in frontend docs.
 - Shared production data behavior depends on Supabase deployment and the live schema, which may differ from checked-in migrations.
-- The local Docker stack contains authenticated MongoDB on a private network and a Fastify API with health, auth, and Manage Users routes. It has not been started by the owner; container networking, MongoDB transactions, and runtime behavior remain unverified. The frontend still uses its existing Supabase code.
+- The local Docker stack contains authenticated MongoDB on a private network and a Fastify API with health, auth, Manage Users, catalog, purchase, and stock routes. It has not been started by the owner; container networking, MongoDB transactions, and runtime behavior remain unverified. The frontend still uses its existing Supabase code.
 
 ## Roles and permissions
 
@@ -68,6 +68,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - Persisted money columns and calculation fields use integer paisa; `sale_items.discount_percent` is numeric.
 - Batch sale allocation in `src/utils/fefo.ts` uses FEFO: positive eligible stock only, `ACTIVE`/`NEAR_EXPIRY`, expiry today or later, then received date and ID for tie-breaking. It rejects an insufficient allocation rather than returning a partial sale. Server-side enforcement depends on the deployed RPC/schema and must be verified there.
 - Expiry is a stock-batch field, not a medicine/product-master field. Product setup does not require expiry, but every purchase batch currently requires a future expiry date; no-expiry batches are not supported by the schema or sale/alert rules.
+- Mongo Phase 5 currently refreshes `NEAR_EXPIRY`/`EXPIRED` lazily using UTC calendar dates; `NEAR_EXPIRY` includes expiry through 90 days from today. Shop-local timezone behavior is not implemented.
 - Do not permit negative stock. Verify the server transaction and constraints as well as frontend allocation before relying on this in production.
 - Stock alerts use sellable stock from positive, unexpired (`expiry_date >= current_date`), `ACTIVE`/`NEAR_EXPIRY` batches for active medicines. Alert low/out counts require `min_stock_alert > 0`; the alert RPC returns no cost, MRP, supplier, or cost-derived value and is available to every active, non-deleted profile regardless of module permission. The existing Products `out_of_stock` KPI does not apply the positive-reorder-threshold condition, so its count may exceed alert out counts. Owner-supplied live results show `stock_alerts_summary` exists with anon EXECUTE false/authenticated true; no migration-history result or end-to-end behavior was supplied.
 - Cost and profit/margin are internal data, not Pharmacy Memo print fields. Receipt rendering displays sale amounts/totals and is styled black on white. Do not add cost, purchase price, profit, or margin to customer-facing slips.
@@ -88,10 +89,11 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - Date: 2026-10-13 — Owner reports the corrected `20261013160000_persist_sales_and_returns.sql` migration applied. Owner-shared metadata query verified `SECURITY DEFINER`, `search_path=public`, `anon EXECUTE=false`, and `authenticated EXECUTE=true` for its 13 RPCs and `pos_catalog()`. End-to-end behavior remains unverified. Return totals are capped cumulatively at the sold quantity; multiple partial-return transactions remain possible.
 - Date: 2026-10-12 — Cost access is role-and-permission scoped by `can_view_cost()`; Cashier is always denied, Accountants are read-only, and Manager access requires a relevant module permission. Verify the deployed function and table grants in Supabase.
 - Date: 2026-10-09 — Pharmacy Memo uses a shared sanitized renderer for 58mm/80mm and A4; template and paper preferences remain browser-local because shared settings storage is not implemented.
+- Date: 2026-10-14 — Purchase posting/void, stock adjustment/write-off and related ledgers are transaction-scoped in the Mongo repository. Purchase/stock request idempotency is still open; expiry-day/status calculations currently use UTC.
 
 ## Current status
 
-- **Current checkout:** branch `feature/mongo-migration`. Phases 0–4 inventory/design/foundation/auth/catalog code are documented or implemented locally. Phase 4 validation: root lint, tests, and build passed; no live MongoDB, transaction, Docker runtime, or frontend migration is verified/performed. The React frontend remains on Supabase while remaining business routes are unimplemented.
+- **Current checkout:** branch `feature/mongo-migration`. Phases 0–5 are documented/implemented locally; Phase 5 adds transactional purchase and stock APIs. Local source tests do not prove MongoDB transaction behavior. Docker/runtime, live MongoDB, and frontend cut-over are not verified/performed; React screens remain on Supabase.
 - **Added; migration owner-reported applied and RPC ACL checked:** Header Stock Alert Bell, accessible alert panel, per-user unseen indicators, permission-aware Products/Stock Inventory navigation, and stock-change refresh events. `stock_alerts_summary(integer)` and its rollback are in `supabase/migrations/20261013140000_stock_alerts_summary.sql` and `supabase/rollback/rollback_20261013140000_stock_alerts_summary.sql`; alert counts/data and UI behavior still need runtime testing.
 - **Verified in history:** The low-stock alert feature is committed as `da7ed5d` on `feature/low-stock-alerts`; it is present in that commit, not missing from the repository history.
 - **Fixed in `b62b547`:** Product-controlled label text is HTML-escaped in generated print markup using the shared receipt helper; hostile markup and quoted attribute payloads are covered by tests. The existing receipt/memo rendering behavior is unchanged.
@@ -178,15 +180,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-14T11:59:46.707Z
+Generated at (UTC): 2026-10-14T13:03:11.247Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- docs: record Phase 4 catalog API
 - bro
 - fix: complete Mongo auth phase
 - :qqww:
 - feat: add MongoDB Docker API foundation
-- docs: define MongoDB migration design
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
@@ -346,6 +348,7 @@ Test files:
 - server/src/catalog.test.ts
 - server/src/config.test.ts
 - server/src/policy.test.ts
+- server/src/stock.test.ts
 - server/src/user-routes.test.ts
 - src/components/inventory/inventoryUiLogic.test.ts
 - src/components/inventory/productFilterLogic.test.ts
