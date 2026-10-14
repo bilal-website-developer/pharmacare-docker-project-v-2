@@ -22,6 +22,8 @@ npm run build
 
 Vite serves on port 3000. `npm test` runs the project's registered unit tests; see the generated test-file list below for coverage.
 
+The local MongoDB/Fastify health-only stack is documented in `docs/DOCKER.md`; it requires Docker Desktop and does not replace the still-active Supabase frontend paths.
+
 ## Folder map
 
 - `src/App.tsx`: eager app shell, navigation state, demo/mock data and page routing; non-Dashboard screens and modal views are lazy-loaded with visible loading/error states.
@@ -35,6 +37,8 @@ Vite serves on port 3000. `npm test` runs the project's registered unit tests; s
 - Other feature screens in `src/components/` include Dashboard, Reports, Suppliers, Cash Book, Controlled Drugs, Master Data, and print-request administration.
 - `src/utils/`, `src/types/`, `src/data/`: reusable logic, TypeScript domain shapes, and mock pharmacy data.
 - `supabase/migrations/`, `supabase/functions/`, `supabase/baseline/`: database migrations, Edge Functions, and a supplied schema snapshot.
+- `server/`: Phase 2 Fastify/TypeScript API skeleton and MongoDB replica-set initializer; only the health endpoint exists so far.
+- `docker/`, `docker-compose.yml`, `Dockerfile`: local Mongo/API/web container setup and Nginx configuration. See `docs/DOCKER.md`.
 - `docs/`: database references, `MASTER_PLAN.md`, `MULTI_SHOP_FULL_PLAN.md`, execution progress, redesign notes, and this context.
 - `scripts/`, `.githooks/`: context generation and commit-hook tooling.
 - `public/`: static assets and fonts.
@@ -47,6 +51,7 @@ Vite serves on port 3000. `npm test` runs the project's registered unit tests; s
 - Mixed persistence: the active POS catalog and sales use `pos_catalog()` and `post_sale()` RPCs; customer/ledger and sales-history paths also use RPCs. Dashboard stock/expiry KPIs still use `INITIAL_PRODUCTS` sample data, and Cash Book transactions/expenses remain React in-memory state. `POSScreen` and controlled-drug sample types are legacy/unreferenced paths; confirm each active page before relying on its data source.
 - Other storage: unknown; no general file/object-storage workflow is established by the checked-in frontend docs.
 - Shared production data behavior depends on Supabase deployment and the live schema, which may differ from checked-in migrations.
+- Phase 2 adds a local MongoDB service and API container definition, but neither has been started or verified; MongoDB runtime behavior and API health remain unknown. The frontend still uses its existing Supabase code.
 
 ## Roles and permissions
 
@@ -76,6 +81,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - Keep business logic in reusable pure helpers when practical, with tests alongside the helper.
 - Use server RPCs for workflows needing atomic multi-table writes or server-side filtering/authorization; use Supabase directly only where the current code does so intentionally.
 - Keep client-facing cost fields nullable/redacted by the server when visibility is denied; never turn unknown cost into zero in UI.
+- Date: 2026-10-14 — The initial Nginx config avoids a restrictive Content Security Policy until active external-service origins are explicitly inventoried, preserving the existing Supabase-backed frontend paths while retaining other security headers.
 - Date: 2026-10-10 — Inventory lists, statistics, movements, adjustments, and write-offs use stock RPCs to keep paging/filtering and mutations server-side.
 - Date: 2026-10-10 — Product data uses server-side list/stat/import RPCs; cost visibility is decided server-side rather than trusted to client hiding.
 - Date: 2026-10-13 — Stock alerts are server-counted, visible to every active signed-in profile, and never include cost-bearing fields. Navigation is permission-gated in the header; seen alert keys are per-user and browser-local. Owner reports the `stock_alerts_summary(integer)` RPC metadata is verified: `SECURITY DEFINER`, `search_path=public`, anon execute false, authenticated execute true.
@@ -85,7 +91,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Current status
 
-- **Current checkout:** branch `feature/mongo-migration`, based on the clean `security/revoke-public-execute` checkout at `17dfc05` (`blabla`). Phase 0 inventory is in `docs/MONGO_MIGRATION_INVENTORY.md`; Phase 1 collection/API design and threat model are in `docs/MONGO_DESIGN.md` and `docs/MONGO_THREAT_MODEL.md`. Both phases are documentation-only; Phase 1 awaits owner approval. No Mongo/API code, SQL, live database, or deployment was changed.
+- **Current checkout:** branch `feature/mongo-migration`, based on the clean `security/revoke-public-execute` checkout at `17dfc05` (`blabla`). Phase 0 inventory is in `docs/MONGO_MIGRATION_INVENTORY.md`; Phase 1 design/threat model are in `docs/MONGO_DESIGN.md` and `docs/MONGO_THREAT_MODEL.md`; Phase 2 Docker/API health skeleton is implemented locally. Lint, tests (126), build, API dependency audit, Compose syntax, and PowerShell syntax checks passed; no image/container/health endpoint was run. No business API routes, live database, or deployment has been added.
 - **Added; migration owner-reported applied and RPC ACL checked:** Header Stock Alert Bell, accessible alert panel, per-user unseen indicators, permission-aware Products/Stock Inventory navigation, and stock-change refresh events. `stock_alerts_summary(integer)` and its rollback are in `supabase/migrations/20261013140000_stock_alerts_summary.sql` and `supabase/rollback/rollback_20261013140000_stock_alerts_summary.sql`; alert counts/data and UI behavior still need runtime testing.
 - **Verified in history:** The low-stock alert feature is committed as `da7ed5d` on `feature/low-stock-alerts`; it is present in that commit, not missing from the repository history.
 - **Fixed in `b62b547`:** Product-controlled label text is HTML-escaped in generated print markup using the shared receipt helper; hostile markup and quoted attribute payloads are covered by tests. The existing receipt/memo rendering behavior is unchanged.
@@ -104,7 +110,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - **W6 TypeScript baseline:** `strict` and `noUnusedParameters` are enabled after both command-line measurements returned zero diagnostics. `noUnusedLocals` remains disabled because its 16 remaining diagnostics are in preserved components and the retained `RepositoryReviewView` import. The broader source cleanup is committed as `cce45bb`; ESLint packages/config remain pending owner approval and TypeScript 7 compatibility review. Details and release-date evidence are in `docs/EXECUTION_PROGRESS.md`.
 - **W7 client bundle optimization:** Sidebar screens and modal views load on demand (Dashboard, login, and shell remain eager); Purchase History XLSX, receipt print workflow, and barcode label code are deferred until used. Loading and retryable screen-error states are present. First-load production gzip measured 172.26 kB, down from 418.24 kB and below the 200 kB target. Lint, tests, and build pass; see `docs/EXECUTION_PROGRESS.md` for emitted chunk sizes. Physical slow/offline-network and route-refresh checks remain manual.
 - **Security ACL plan:** Owner-reported live ACL audit found `stock_batches` and the other four 4c cost-bearing tables revoked; a later `stock_batches` grant had undone its revoke once. Reassert revokes in the new lockdown migration. Staged files A-D and rollback scripts are proposals only and have not been applied. The owner reports profile DML already revoked; file D reasserts that state.
-- **Next:** Mongo implementation is gated by owner approval of `docs/MONGO_DESIGN.md` and its listed decisions. Track phase status in `docs/MONGO_MIGRATION.md`; the pre-migration Supabase code paths remain unchanged.
+- **Next:** Await owner-provided Docker Compose and HTTP health output before claiming the Phase 2 stack works or starting business routes. Track gates in `docs/MONGO_MIGRATION.md`; the existing Supabase code paths remain unchanged.
 
 ## Known issues and Later
 
@@ -141,6 +147,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
+- 2026-10-14 — Added Phase 2 Docker Compose topology, MongoDB keyfile/replica-set initialization, least-privilege app user/index initialization, Nginx frontend/API proxy, secret generator, and Fastify Mongo health skeleton. Lint, 126 tests, build, API audit, Compose syntax, and PowerShell syntax passed; no container was started. Owner-run Compose/HTTP verification remains pending.
 - 2026-10-14 — Drafted Phase 1 Mongo collection/API design and top-15 threat model; added the phase tracker. Documentation only; implementation and security controls await owner approval and verification.
 - 2026-10-14 — Created `feature/mongo-migration` from the owner-confirmed clean `security/revoke-public-execute` checkout and completed read-only Phase 0 source inventory in `docs/MONGO_MIGRATION_INVENTORY.md`. No SQL, live database, application code, or deployment was changed; live grants/schema and runtime behavior remain unverified.
 - 2026-10-14 — Read-only code/database/security/logic/returns audit recorded in `docs/audit/`. Local lint, 18 test scripts (122 tests), build, and production dependency audit pass. No SQL, deployment, demo data, or application-code change was made for the audit. Key current risks: missing active-POS prescription enforcement, forward-folder rollback files, dashboard sample stock KPIs, in-memory Cash Book, and return/report settlement gaps.
@@ -194,24 +201,25 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-14T10:14:44.192Z
+Generated at (UTC): 2026-10-14T11:07:23.882Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- docs: define MongoDB migration design
 - docs: inventory Mongo migration scope
 - blabla
 - return bill
 - Fix stored XSS in product label printing
-- feat: add header low stock alerts
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
-- - `build`: `vite build`
+- - `build:web`: `vite build`
+- - `build`: `npm run build:web && npm --prefix server run build`
 - - `preview`: `vite preview`
 - - `clean`: `rm -rf dist server.js`
 - - `prepare`: `node scripts/setup-hooks.mjs`
 - - `context:update`: `node scripts/update-context.mjs`
-- - `lint`: `tsc --noEmit`
+- - `lint`: `tsc --noEmit && npm --prefix server run lint`
 - - `test:fefo`: `tsx --test src/utils/fefo.test.ts`
 - - `test:receipt`: `tsx --test src/utils/receipt.test.ts`
 - - `test:inventory-ui`: `tsx --test src/components/inventory/inventoryUiLogic.test.ts`
@@ -230,7 +238,8 @@ npm scripts:
 - - `test:labels`: `tsx --test src/utils/labelUtils.test.ts`
 - - `test:permissions`: `tsx --test src/permissions.test.ts`
 - - `test:manage-users-policy`: `tsx --test supabase/functions/manage-users/policy.test.ts`
-- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:product-filters && npm run test:master-data && npm run test:print-snapshot && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy`
+- - `test:server`: `npm --prefix server test`
+- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:product-filters && npm run test:master-data && npm run test:print-snapshot && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:server`
 
 Dependencies and versions:
 - - `@e965/xlsx` ^0.20.3 (dependency)
@@ -353,6 +362,8 @@ src/
 ```
 
 Test files:
+- server/src/app.test.ts
+- server/src/config.test.ts
 - src/components/inventory/inventoryUiLogic.test.ts
 - src/components/inventory/productFilterLogic.test.ts
 - src/components/inventory/productImportLogic.test.ts
@@ -378,6 +389,14 @@ Environment variable names from .env.example files (values are not read into thi
 - APP_URL
 - DEMO_MODE
 - GEMINI_API_KEY
+- JWT_ACCESS_SECRET
+- MONGO_APP_DB
+- MONGO_APP_PASSWORD
+- MONGO_APP_USERNAME
+- MONGO_REPLICA_KEY
+- MONGO_ROOT_PASSWORD
+- MONGO_ROOT_USERNAME
+- REFRESH_TOKEN_PEPPER
 - SUPABASE_ANON_KEY
 - SUPABASE_URL
 - VITE_SUPABASE_ANON_KEY

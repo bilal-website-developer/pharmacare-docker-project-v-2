@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
+    "build:web": "vite build",
+    "build": "npm run build:web && npm --prefix server run build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "prepare": "node scripts/setup-hooks.mjs",
     "context:update": "node scripts/update-context.mjs",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && npm --prefix server run lint",
     "test:fefo": "tsx --test src/utils/fefo.test.ts",
     "test:receipt": "tsx --test src/utils/receipt.test.ts",
     "test:inventory-ui": "tsx --test src/components/inventory/inventoryUiLogic.test.ts",
@@ -29,7 +30,8 @@
     "test:labels": "tsx --test src/utils/labelUtils.test.ts",
     "test:permissions": "tsx --test src/permissions.test.ts",
     "test:manage-users-policy": "tsx --test supabase/functions/manage-users/policy.test.ts",
-    "test": "npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:product-filters && npm run test:master-data && npm run test:print-snapshot && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy"
+    "test:server": "npm --prefix server test",
+    "test": "npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:product-filters && npm run test:master-data && npm run test:print-snapshot && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:server"
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",

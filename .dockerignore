@@ -1,0 +1,16 @@
+.git
+.github
+.vscode
+.copilot
+node_modules
+dist
+coverage
+.env
+.env.*
+**/.env
+**/.env.*
+.npmrc
+**/.npmrc
+*.log
+server/node_modules
+server/dist
