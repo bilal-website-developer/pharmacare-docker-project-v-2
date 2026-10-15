@@ -124,6 +124,8 @@ services:
       args:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
+        VITE_BACKEND: ${VITE_BACKEND:-api}
+        VITE_SHOP_SLUG: ${VITE_SHOP_SLUG:-main}
     restart: unless-stopped
     ports:
       - "8080:80"

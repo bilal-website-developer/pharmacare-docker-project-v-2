@@ -21,7 +21,8 @@ import { TopNav } from './components/TopNav';
 import { DashboardView } from './components/DashboardView';
 import { LoginView } from './components/LoginView';
 import type { ProductFilter } from './components/InventoryScreen';
-import { AuthSession, loadAuthSession } from './utils/auth';
+import { AuthSession, refreshAuthSession, restoreAuthSession, signOut } from './utils/auth';
+import { getBackend, isUnauthenticatedApiError } from './api';
 import { supabase } from './utils/supabase';
 import { isAdminRole, PermissionsProvider, usePermissions } from './permissions';
 import {
@@ -96,44 +97,39 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState('');
 
   useEffect(() => {
-    const client = supabase;
-    if (!client) {
-      setSessionChecked(true);
-      return;
-    }
     let disposed = false;
-    const restoreSession = async () => {
-      try {
-        const { data: authData, error: authError } = await client.auth.getSession();
-        if (authError) throw authError;
-        if (!authData.session) {
-          if (!disposed) setSession(null);
-          return;
-        }
-        const { data: userData, error: userError } = await client.auth.getUser();
-        if (userError) throw userError;
-        if (!userData.user) throw new Error('Your session is no longer valid. Sign in again.');
-        const profile = await loadAuthSession(userData.user.id, userData.user.email);
-        if (!disposed) setSession(profile);
-      } catch (error) {
-        if (!disposed) {
-          setSession(null);
-          setAuthMessage(error instanceof Error ? error.message : 'Could not restore your session.');
-        }
-      } finally {
-        if (!disposed) setSessionChecked(true);
-      }
+    const handleApiSessionExpired = () => {
+      setSession(null);
+      setSessionChecked(true);
+      setAuthMessage('Your session has expired. Sign in again.');
     };
-    void restoreSession();
-    const { data: authListener } = client.auth.onAuthStateChange((event) => {
+    window.addEventListener('pharma-care:api-session-expired', handleApiSessionExpired);
+    const client = getBackend() === 'supabase' ? supabase : null;
+    const authListener = client?.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT' && !disposed) {
         setSession(null);
         setSessionChecked(true);
       }
     });
+    void restoreAuthSession()
+      .then((profile) => {
+        if (!disposed) setSession(profile);
+      })
+      .catch((error: unknown) => {
+        if (!disposed) {
+          setSession(null);
+          if (!isUnauthenticatedApiError(error)) {
+            setAuthMessage(error instanceof Error ? error.message : 'Could not restore your session.');
+          }
+        }
+      })
+      .finally(() => {
+        if (!disposed) setSessionChecked(true);
+      });
     return () => {
       disposed = true;
-      authListener.subscription.unsubscribe();
+      window.removeEventListener('pharma-care:api-session-expired', handleApiSessionExpired);
+      authListener?.data.subscription.unsubscribe();
     };
   }, []);
 
@@ -141,17 +137,14 @@ export default function App() {
     if (!session) return;
     const refreshProfile = async () => {
       try {
-        if (!supabase) throw new Error('Supabase is not configured.');
-        const { data, error } = await supabase.auth.getUser();
-        if (error) throw error;
-        if (!data.user) throw new Error('Your session is no longer valid. Sign in again.');
-        const updated = await loadAuthSession(data.user.id, data.user.email);
+        const updated = await refreshAuthSession();
         setSession(updated);
         setAuthMessage('');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Could not verify your account.';
         setAuthMessage(message);
         if (
+          isUnauthenticatedApiError(error) ||
           (error instanceof Error && error.name === 'ProfileLoadError') ||
           message.startsWith('Your account is disabled') ||
           message.startsWith('No profile exists') ||
@@ -159,7 +152,7 @@ export default function App() {
           message.startsWith('Your session is no longer valid')
         ) {
           setSession(null);
-          await supabase?.auth.signOut();
+          if (getBackend() === 'supabase') await supabase?.auth.signOut();
         }
       }
     };
@@ -176,8 +169,9 @@ export default function App() {
       window.clearTimeout(timeoutId);
       timeoutId = window.setTimeout(() => {
         void (async () => {
-          const { error } = await supabase?.auth.signOut() ?? { error: new Error('Supabase is not configured.') };
-          if (error) {
+          try {
+            await signOut();
+          } catch {
             window.alert('Could not end the inactive session. Please contact your administrator.');
             expireSession();
             return;
@@ -196,23 +190,17 @@ export default function App() {
     };
   }, [session?.userId]);
 
-  const handleLogin = async (userId: string, email: string) => {
+  const handleLogin = async (authenticatedSession: AuthSession) => {
     setAuthMessage('');
-    try {
-      const authenticatedSession = await loadAuthSession(userId, email);
-      setSession(authenticatedSession);
-      window.history.replaceState({}, '', '/');
-    } catch (error) {
-      await supabase?.auth.signOut();
-      throw error;
-    }
+    setSession(authenticatedSession);
+    window.history.replaceState({}, '', '/');
   };
 
   const handleLogout = async () => {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      window.alert(`Could not end the session: ${error.message}`);
+    try {
+      await signOut();
+    } catch (error) {
+      window.alert(`Could not end the session: ${error instanceof Error ? error.message : 'Please try again.'}`);
       return;
     }
     setSession(null);

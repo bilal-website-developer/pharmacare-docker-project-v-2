@@ -22,7 +22,7 @@ test('loads valid configuration and safely encodes MongoDB credentials', () => {
 
   assert.equal(config.mongoDbName, 'pharmacare');
   assert.match(config.mongoUri, /api%20user:p%40ssword/);
-  assert.equal(config.port, 3000);
+  assert.equal(config.port, 3001);
 });
 
 test('refuses missing or weak secrets without echoing values', () => {

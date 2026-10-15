@@ -16,7 +16,12 @@ This file tracks migration phase deliverables and verification. It does not auth
 | 6 | POS sales and customer APIs | Implemented locally; Mongo runtime verification pending | Transactional sale/FEFO, discounts, payments, customers/khata, prescription capture, history, and local tests are implemented. Replica-set sale tests are present but were skipped because Mongo environment variables/runtime were unavailable. |
 | 6b | Real Mongo verification and timezone consistency | Implemented locally; real-Mongo verification awaits owner-run Compose | Added a Compose test runner for all seven replica-set tests and propagated shop-local “today” through stock, expiry, alert, purchase, adjustment, write-off, and sales logic. Run the documented Docker test steps to verify real Mongo behavior. |
 | 7+ | Remaining business API implementation | Not started | Preserve the Phase 2 Docker verification gate; implement transactions for every multi-document business write. |
+| 8 | Frontend API client and module-by-module switch | Batch 1 locally verified; manual checklist pending | Auth/session and Stock Alerts API adapter are wired behind `VITE_BACKEND`; Supabase fallback remains. `npm test` includes the API-client test. Local Fastify defaults to 3001; Compose explicitly uses private port 3000. |
 | 12 | Cut-over and Supabase cleanup | Blocked on explicit approval after all manual tests pass | Never delete `supabase/` or migrations; cut-over plan requires owner approval. |
+
+## Autopilot step 0 — housekeeping
+
+**Status: VERIFIED (local checks only).** `npm run lint` and `npm run build` passed. `npm run test:api-client` passed 4/4. `npm test` passed 184 tests, failed 0, skipped 7 (all real-Mongo integration tests; not Mongo runtime verification). The Vite build emitted existing `__dirname` and large-chunk warnings. Manual UI tests and live Mongo/Docker verification remain outstanding.
 
 ## Phase 1 verification and open items
 

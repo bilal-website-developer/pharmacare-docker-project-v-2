@@ -4,7 +4,7 @@ import { z } from 'zod';
 const configSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().min(1).default('0.0.0.0'),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   MONGO_HOST: z.string().min(1),
   MONGO_PORT: z.coerce.number().int().min(1).max(65535).default(27017),
   MONGO_APP_DB: z.string().regex(/^[A-Za-z0-9_-]{1,63}$/),

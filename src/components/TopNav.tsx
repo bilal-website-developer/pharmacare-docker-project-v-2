@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { ChevronDown, KeyRound, LogOut, Type } from 'lucide-react';
 import { ROLE_LABELS, UserRole } from '../types/pharmacy';
 import { supabase } from '../utils/supabase';
+import { apiRequest, getBackend } from '../api';
 import PharmaLogo from './PharmaLogo';
 import { StockAlertBell } from './StockAlertBell';
 
@@ -103,6 +104,15 @@ export const TopNav: React.FC<TopNavProps> = ({
     const checkServerHealth = async () => {
       if (!navigator.onLine) {
         if (active) setServerHealth('offline');
+        return;
+      }
+      if (getBackend() === 'api') {
+        try {
+          const health = await apiRequest<{ status: string }>('/api/health');
+          if (active) setServerHealth(health.status === 'ok' ? 'online' : 'unreachable');
+        } catch {
+          if (active) setServerHealth('unreachable');
+        }
         return;
       }
       if (!supabase) {

@@ -1,6 +1,6 @@
 # Local Docker development
 
-This setup is for local development only. It builds the existing React frontend and a Fastify health-check skeleton, runs a single-node authenticated MongoDB replica set, creates a least-privilege application user, and creates the initial indexes. It does not implement business API routes or migrate Supabase data.
+This setup is for local development only. It builds the React frontend and Fastify API, runs a single-node authenticated MongoDB replica set, creates a least-privilege application user, and creates the initial indexes. The frontend backend selection and migrated modules are still in progress; the Supabase paths remain available.
 
 MongoDB is only on the private Docker `database` network and has no published host port. The API is not published on the host; only Nginx is exposed at `http://localhost:8080`. Do not treat this setup as production deployment configuration.
 
@@ -20,7 +20,9 @@ From the repository root in PowerShell, generate a new ignored `.env` file. The 
 
 The script uses the operating system cryptographic random-number generator. `.env` is ignored by Git and excluded from Docker build contexts. Do not display it, paste it into chat, or commit it.
 
-The legacy frontend still contains Supabase-backed screens. The generated file leaves `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` blank. If you intentionally want those legacy screens to contact an existing Supabase project during this phase, add the public project URL and anon key to `.env` locally before building. Do not put a service-role key in either variable or in the frontend build.
+The frontend build uses `VITE_BACKEND=api` by default and reads `VITE_SHOP_SLUG` to select the shop for API sign-in. Set `VITE_SHOP_SLUG` to the intended shop's slug before building; its default in `.env.example` is a fake development value. These are build-time settings, so rebuild the web image after changing them.
+
+To use the legacy Supabase paths, set `VITE_BACKEND=supabase` and configure `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the ignored `.env` before building. These values are public client settings; never put a service-role key in either variable or in the frontend build.
 
 ## Build and start
 
@@ -33,6 +35,8 @@ docker compose ps
 
 `docker compose up` waits for MongoDB health, then `mongo-init` initiates `rs0`, creates the app user with `readWrite` on `pharmacare` only, and creates the planned indexes. The API starts after initialization and MongoDB health checks pass. Nginx starts after the API health check passes.
 
+When running Vite and the API directly on the host, use two terminals: `npm run dev` serves Vite on port 3000, while `npm --prefix server run dev` starts Fastify on port 3001. Vite proxies `/api` to `http://127.0.0.1:3001`; the Fastify development default is 3001 to avoid a port conflict. Compose explicitly sets `PORT=3000` inside the API container, where Nginx proxies `/api` over the private Docker network to `api:3000`. The API container remains unpublished on the host.
+
 ## Bootstrap the first API user
 
 After the stack is running, create the initial super-admin interactively:
@@ -41,7 +45,7 @@ After the stack is running, create the initial super-admin interactively:
 npm run seed:superadmin
 ```
 
-The command attaches to the API container, prompts for shop/user details and a hidden password, and refuses to create a second bootstrap user in that shop. It stores only the Argon2id password hash. The existing frontend still authenticates through its legacy Supabase integration; this bootstrap does not cut over the UI.
+The command attaches to the API container, prompts for shop/user details and a hidden password, and refuses to create a second bootstrap user in that shop. It stores only the Argon2id password hash. In API mode, sign-in uses the configured `VITE_SHOP_SLUG`, and the login form retains its existing email/password fields.
 
 ## Verify the local health response
 

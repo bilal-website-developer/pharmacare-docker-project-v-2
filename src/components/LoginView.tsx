@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { Check, Eye, EyeOff, LockKeyhole, UserRound } from 'lucide-react';
-import { supabase } from '../utils/supabase';
+import { signIn, type AuthSession } from '../utils/auth';
 import PharmaLogo from './PharmaLogo';
 import { APP_NAME } from '../constants/brand';
 
 interface LoginViewProps {
-  onLogin: (userId: string, email: string) => Promise<void>;
+  onLogin: (session: AuthSession) => Promise<void>;
   initialError?: string;
 }
 
@@ -21,14 +21,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, initialError = ''
     setLoading(true);
     setError('');
     try {
-      if (!supabase) throw new Error('Supabase is not configured. Contact your administrator.');
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-      if (signInError) throw signInError;
-      if (!data.user?.email) throw new Error('Authentication returned no user email.');
-      await onLogin(data.user.id, data.user.email);
+      const session = await signIn(email.trim(), password);
+      await onLogin(session);
       setPassword('');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Sign-in failed. Please try again.');

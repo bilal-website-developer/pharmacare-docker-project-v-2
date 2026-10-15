@@ -6,7 +6,7 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while the React frontend still uses legacy Supabase paths. Catalog, supplier, purchase, stock, POS sale, customer, and sales-history APIs are implemented locally; frontend cut-over and Mongo runtime verification remain pending.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phase 8 batch 1 wires auth/session and Stock Alerts through the API client behind `VITE_BACKEND`; broader screen cut-over and real Mongo runtime verification remain pending.
 
 ## How to run
 
@@ -20,7 +20,7 @@ npm test
 npm run build
 ```
 
-Vite serves on port 3000. `npm test` runs the project's registered unit tests; see the generated test-file list below for coverage.
+Vite serves on port 3000. For local API development, run `npm --prefix server run dev` separately; Fastify defaults to port 3001 and Vite proxies `/api` there. Compose explicitly runs the private API service on port 3000. `npm test` runs the project's registered unit tests, including the API client test.
 
 The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requires Docker Desktop. MongoDB backs API auth, user, catalog, purchase, and stock routes; the frontend still uses the existing Supabase paths.
 
@@ -149,7 +149,8 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
-- 2026-10-15 — Phase 6b adds a Compose test runner and documented `.env`-backed command for seven real-Mongo integration tests, and aligns stock/sale expiry calculations to shop-local calendar days. Karachi midnight boundary and local checks pass (187 tests: 180 passed, 0 failed, 7 Mongo integration tests skipped); real Mongo execution awaits owner-run proof.
+- 2026-10-15 — Phase 8 batch 1 wires auth/session and Stock Alerts through the API client behind `VITE_BACKEND`; API client tests are registered in the full test chain. Local Fastify defaults to port 3001 for the Vite proxy; Compose explicitly uses private port 3000. Lint/build pass; focused API client tests 4/4; full suite 184 pass, 0 fail, 7 Mongo integration skips. Manual UI and real-Mongo checks remain pending.
+- 2026-10-15 — Phase 6b adds a Compose test runner and documented `.env`-backed command for seven real-Mongo integration tests, and aligns stock/sale expiry calculations to shop-local calendar days. Karachi midnight boundary and local checks passed (187 tests: 180 passed, 0 failed, 7 Mongo integration tests skipped); real Mongo execution awaits proof.
 - 2026-10-14 — Phases 5b/6 implemented Mongo idempotency, transactional sales, FEFO, role discount caps, split tender, customer credit, prescription capture, and sales history. Local tests/build passed; Mongo integration/runtime verification remained blocked.
 - 2026-10-14 — Implemented Phase 4 catalog/supplier APIs, EAN-13 registry, product CSV import/export, trash/restore, and role-based cost DTO filtering; updated design/tracker for separate `medicineUnits`. Root lint, full tests, and build pass locally; Mongo/Docker runtime and frontend cut-over remain unverified/not performed.
 - 2026-10-14 — Implemented Phase 3 Mongo-backed auth, rotating hashed refresh sessions, lockout, authorization, Manage Users policy, audit entries, and interactive super-admin bootstrap. Runtime remains unverified.
@@ -180,15 +181,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-15T06:45:54.511Z
+Generated at (UTC): 2026-10-15T09:05:06.582Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: align shop timezone expiry handling
 - feat: implement POS sales and customer APIs
 - docs: record expiry timezone decision
 - feat: add Mongo write idempotency checks
 - feat: implement Mongo stock and purchasing API
-- docs: record Phase 4 catalog API
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
@@ -218,8 +219,9 @@ npm scripts:
 - - `test:labels`: `tsx --test src/utils/labelUtils.test.ts`
 - - `test:permissions`: `tsx --test src/permissions.test.ts`
 - - `test:manage-users-policy`: `tsx --test supabase/functions/manage-users/policy.test.ts`
+- - `test:api-client`: `tsx --test src/api/client.test.ts`
 - - `test:server`: `npm --prefix server test`
-- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:product-filters && npm run test:master-data && npm run test:print-snapshot && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:server`
+- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:product-filters && npm run test:master-data && npm run test:print-snapshot && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:server`
 
 Dependencies and versions:
 - - `@e965/xlsx` ^0.20.3 (dependency)
@@ -248,6 +250,11 @@ Dependencies and versions:
 src/ tree (maximum two directory levels):
 ```text
 src/
+  src/api/
+    src/api/client.test.ts
+    src/api/client.ts
+    src/api/config.ts
+    src/api/index.ts
   src/App.tsx
   src/components/
     src/components/BarcodeScannerTest.tsx
@@ -303,6 +310,7 @@ src/
     src/data/sales.ts
     src/data/stockAlertLogic.test.ts
     src/data/stockAlertLogic.ts
+    src/data/stockAlerts.test.ts
     src/data/stockAlerts.ts
   src/index.css
   src/main.tsx
@@ -351,6 +359,7 @@ Test files:
 - server/src/sales.test.ts
 - server/src/stock.test.ts
 - server/src/user-routes.test.ts
+- src/api/client.test.ts
 - src/components/inventory/inventoryUiLogic.test.ts
 - src/components/inventory/productFilterLogic.test.ts
 - src/components/inventory/productImportLogic.test.ts
@@ -359,6 +368,7 @@ Test files:
 - src/data/posCatalogLogic.test.ts
 - src/data/returnLogic.test.ts
 - src/data/stockAlertLogic.test.ts
+- src/data/stockAlerts.test.ts
 - src/permissions.test.ts
 - src/utils/discount.test.ts
 - src/utils/fefo.test.ts
@@ -387,6 +397,8 @@ Environment variable names from .env.example files (values are not read into thi
 - REFRESH_TOKEN_PEPPER
 - SUPABASE_ANON_KEY
 - SUPABASE_URL
+- VITE_BACKEND
+- VITE_SHOP_SLUG
 - VITE_SUPABASE_ANON_KEY
 - VITE_SUPABASE_URL
 <!-- AUTO:END -->
