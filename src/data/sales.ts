@@ -238,6 +238,61 @@ function isCustomer(value: unknown): value is Customer {
     && isNonNegativeInteger(value.storeCreditPaisa);
 }
 
+function parseApiCustomer(value: unknown): Customer | null {
+  if (!isRecord(value)
+    || !hasExactKeys(value, [
+      'id', 'name', 'phone', 'cnic', 'address', 'creditLimitPaisa',
+      'currentBalancePaisa', 'storeCreditPaisa', 'createdAt', 'updatedAt',
+    ])
+    || !isString(value.id) || !isString(value.name) || !isString(value.phone)
+    || !(value.cnic === null || isString(value.cnic))
+    || !isString(value.address) || !isString(value.createdAt) || !isString(value.updatedAt)) {
+    return null;
+  }
+  const creditLimitPaisa = apiPaisaNumber(value.creditLimitPaisa);
+  const currentBalancePaisa = apiPaisaNumber(value.currentBalancePaisa);
+  const storeCreditPaisa = apiPaisaNumber(value.storeCreditPaisa);
+  if (creditLimitPaisa === null || currentBalancePaisa === null || storeCreditPaisa === null) return null;
+  return {
+    id: value.id,
+    name: value.name,
+    phone: value.phone,
+    ...(value.cnic === null ? {} : { cnic: value.cnic }),
+    address: value.address,
+    creditLimitPaisa,
+    currentBalancePaisa,
+    storeCreditPaisa,
+  };
+}
+
+function parseApiLedgerEntry(value: unknown): CustomerAccountsData['ledgerEntries'][string][number] | null {
+  if (!isRecord(value)
+    || !hasExactKeys(value, [
+      'id', 'customerId', 'date', 'type', 'referenceNo', 'description',
+      'debitPaisa', 'creditPaisa', 'runningBalancePaisa',
+    ])
+    || !isString(value.id) || !isString(value.customerId) || !isString(value.date)
+    || !(value.type === 'INVOICE' || value.type === 'PAYMENT' || value.type === 'RETURN')
+    || !isString(value.referenceNo) || !isString(value.description)) {
+    return null;
+  }
+  const debitPaisa = apiPaisaNumber(value.debitPaisa);
+  const creditPaisa = apiPaisaNumber(value.creditPaisa);
+  const runningBalancePaisa = apiPaisaNumber(value.runningBalancePaisa, true);
+  if (debitPaisa === null || creditPaisa === null || runningBalancePaisa === null) return null;
+  return {
+    id: value.id,
+    customerId: value.customerId,
+    date: value.date,
+    type: value.type,
+    referenceNo: value.referenceNo,
+    description: value.description,
+    debitPaisa,
+    creditPaisa,
+    runningBalancePaisa,
+  };
+}
+
 function isLedgerEntry(value: unknown): value is CustomerAccountsData['ledgerEntries'][string][number] {
   return isRecord(value)
     && isString(value.id)
@@ -404,6 +459,28 @@ export async function loadPosCustomers(): Promise<Customer[]> {
 }
 
 export async function loadCustomerAccountsSummary(): Promise<CustomerAccountsData> {
+  if (getBackend() === 'api') {
+    const response = await apiRequest<unknown>('/api/customers/accounts/summary');
+    if (!isRecord(response)
+      || !hasExactKeys(response, ['customers', 'ledgerEntries'])
+      || !Array.isArray(response.customers) || !Array.isArray(response.ledgerEntries)) {
+      throw new Error('The customer accounts service returned an invalid response.');
+    }
+    const customers = response.customers.map(parseApiCustomer);
+    const entries = response.ledgerEntries.map(parseApiLedgerEntry);
+    if (customers.some((customer) => customer === null) || entries.some((entry) => entry === null)) {
+      throw new Error('The customer accounts service returned an invalid response.');
+    }
+    const ledgerEntries: CustomerAccountsData['ledgerEntries'] = {};
+    for (const entry of entries) {
+      if (!entry) continue;
+      (ledgerEntries[entry.customerId] ??= []).push(entry);
+    }
+    return {
+      customers: customers.filter((customer): customer is Customer => customer !== null),
+      ledgerEntries,
+    };
+  }
   return callSupabaseRpc(
     'customer_accounts_summary',
     undefined,
@@ -419,6 +496,21 @@ export async function saveCustomer(input: {
   address: string;
   creditLimitPaisa: number;
 }): Promise<Customer> {
+  if (getBackend() === 'api') {
+    const response = await apiRequest<unknown>('/api/customers', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: input.name,
+        phone: input.phone,
+        cnic: input.cnic || null,
+        address: input.address,
+        creditLimitPaisa: String(input.creditLimitPaisa),
+      }),
+    });
+    const customer = parseApiCustomer(response);
+    if (!customer) throw new Error('The customer service returned an invalid response.');
+    return customer;
+  }
   return callSupabaseRpc('save_customer', {
     p_name: input.name,
     p_phone: input.phone,
@@ -433,6 +525,28 @@ export async function recordCustomerPayment(
   amountPaisa: number,
   note: string,
 ): Promise<CustomerPaymentResult> {
+  if (getBackend() === 'api') {
+    const response = await apiRequest<unknown>(`/api/customers/${encodeURIComponent(customerId)}/payments`, {
+      method: 'POST',
+      body: JSON.stringify({ amountPaisa: String(amountPaisa), method: 'CASH', note }),
+    });
+    if (!isRecord(response)
+      || !hasExactKeys(response, ['referenceNo', 'dateTime', 'balanceAfterPaisa', 'storeCreditPaisa'])
+      || !isString(response.referenceNo) || !isString(response.dateTime)) {
+      throw new Error('The customer payment service returned an invalid response.');
+    }
+    const balanceAfterPaisa = apiPaisaNumber(response.balanceAfterPaisa);
+    const storeCreditPaisa = apiPaisaNumber(response.storeCreditPaisa);
+    if (balanceAfterPaisa === null || storeCreditPaisa === null) {
+      throw new Error('The customer payment service returned an invalid response.');
+    }
+    return {
+      referenceNo: response.referenceNo,
+      dateTime: response.dateTime,
+      balanceAfterPaisa,
+      storeCreditPaisa,
+    };
+  }
   return callSupabaseRpc('record_customer_payment', {
     p_customer_id: customerId,
     p_amount_paisa: amountPaisa,

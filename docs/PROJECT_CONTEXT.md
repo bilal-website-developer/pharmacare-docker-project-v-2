@@ -6,7 +6,7 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phases 0–7 have server-side implementation; targeted replica-set tests pass locally. Phase 8 has wired auth/session, Stock Alerts, Suppliers, POS catalog, Settings, and POS sales through the API client behind `VITE_BACKEND`; broader screen cut-over and manual UI acceptance remain pending.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phases 0–7 have server-side implementation; targeted replica-set tests pass locally. Phase 8 has wired auth/session, Stock Alerts, Suppliers, POS catalog, Settings, POS sales, and Customer Ledger account/payment operations through the API client behind `VITE_BACKEND`; broader screen cut-over and manual UI acceptance remain pending.
 
 ## How to run
 
@@ -93,7 +93,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Current status
 
-- **Current checkout:** branch `feature/mongo-migration`. Phases 0–7 have API implementation; latest evidence is in `docs/MONGO_MIGRATION.md`. The Compose suite covers 10 Mongo replica-set tests; `npm test` skips them outside Compose. Phase 8 has wired auth/session, Stock Alerts, Suppliers, POS catalog, Settings, and POS sales; most React screens still use Supabase. No manual UI acceptance or production verification is available.
+- **Current checkout:** branch `feature/mongo-migration`. Phases 0–7 have API implementation; latest evidence is in `docs/MONGO_MIGRATION.md`. The Compose suite covers 10 Mongo replica-set tests; `npm test` skips them outside Compose. Phase 8 has wired auth/session, Stock Alerts, Suppliers, POS catalog, Settings, POS sales, and Customer Ledger account/payment operations; most React screens still use Supabase. No manual UI acceptance or production verification is available.
 - **Added; migration owner-reported applied and RPC ACL checked:** Header Stock Alert Bell, accessible alert panel, per-user unseen indicators, permission-aware Products/Stock Inventory navigation, and stock-change refresh events. `stock_alerts_summary(integer)` and its rollback are in `supabase/migrations/20261013140000_stock_alerts_summary.sql` and `supabase/rollback/rollback_20261013140000_stock_alerts_summary.sql`; alert counts/data and UI behavior still need runtime testing.
 - **Fixed in `b62b547`:** Product-controlled label text is HTML-escaped in generated print markup using the shared receipt helper; hostile markup and quoted attribute payloads are covered by tests. The existing receipt/memo rendering behavior is unchanged.
 - **Done:** Phase 1 EAN-13 validation/generation and bulk assignment for `medicines.barcode`; product labels use a dedicated size/copies/fields print dialog. Migration files are under `supabase/migrations/20261012180000_assign_medicine_barcodes.sql` and its companion unique-index migration.
@@ -107,7 +107,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - **Implemented locally:** Barcode validation, medicine-level EAN-13 generation and bulk assignment RPC files, and barcode printing are present. Client package commit `818af6c` adds Edit/Print/Make actions on product rows, cards, and a product-details dialog; per-product label quantities (1–200) with a 1,000-label job cap; a scanner test dialog; and fast keyboard-scanner handling in Products search and POS. Label printing requires an assigned barcode; it no longer falls back to the product code. Missing barcode-generation RPCs show an explicit notice. This package changed no SQL/schema and applied no migration. Real scanner/printer hardware remains untested.
 - **W6/W7:** Strict and `noUnusedParameters` TypeScript checks pass; `noUnusedLocals` remains disabled for 16 preserved-component diagnostics. Sidebar/screens and heavy XLSX/print/barcode code are lazy-loaded; first-load gzip measured 172.26 kB (<200 kB). Physical slow/offline and route-refresh checks remain manual; see `docs/EXECUTION_PROGRESS.md`.
 - **Security ACL plan:** Owner-reported live ACL audit found `stock_batches` and the other four 4c cost-bearing tables revoked; a later `stock_batches` grant had undone its revoke once. Reassert revokes in the new lockdown migration. Staged files A-D and rollback scripts are proposals only and have not been applied. The owner reports profile DML already revoked; file D reasserts that state.
-- **Next / Phase 8 Customers/Ledger and Sales History:** Continue module migration with `VITE_BACKEND` and Supabase paths intact. POS checkout uses `/api/sales`, shop-scoped `/api/pos/customers`, strict API DTO parsing, server-owned discounts/totals/rounding, and prescription capture. The current full suite passed 199, failed 0, skipped 10; the Compose replica-set suite passed 10/10. Manual UI acceptance remains outstanding.
+- **Next / Phase 8 Sales History:** Continue module migration with `VITE_BACKEND` and Supabase paths intact. POS checkout uses `/api/sales`, shop-scoped `/api/pos/customers`, strict API DTO parsing, server-owned discounts/totals/rounding, and prescription capture. Customer Ledger loads Mongo account/ledger data and supports API customer creation and cash payment. Manual UI acceptance remains outstanding.
 
 ## Known issues and Later
 
@@ -146,6 +146,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 - 2026-10-15 — Phase 7 implemented Mongo returns, voids, print requests, shop settings, expenses, cash book, sales/stock reports, and live dashboard summary. Targeted Compose replica-set tests passed 9/9 (0 failed/skipped); current root suite passed 184, failed 0, skipped 9. Manual UI acceptance and production verification remain open.
 - 2026-10-15 — Phase 8 wires auth/session, Stock Alerts, Suppliers, POS catalog, server-backed Settings, and POS checkout behind `VITE_BACKEND`; API writes use idempotency keys and the Supabase fallback remains. POS sales/customer adapter tests passed 3/3, POS catalog tests 6/6, server sales tests 9/9, real Mongo suite 10/10, and the full suite 199 passed, 0 failed, 10 Mongo integration skips. Manual UI acceptance remains pending.
+- 2026-10-16 — Phase 8 wires Customer Ledger account loading, customer creation, and cash payment through strict API DTO adapters while preserving Supabase fallback. Focused tests passed 4/4; lint/build passed; full suite passed 203, failed 0, skipped 10. Manual UI acceptance remains pending.
 - 2026-10-15 — Fixed Mongo app-user authentication in `mongo-init`: app URI uses the app database as `authSource`, root remains on `admin`. Compose initialized indexes, mongo-init exited 0, Mongo/API/web were healthy, and proxied `/api/health` returned 200 without resetting volumes. Real replica-set tests passed 7/7, 0 skips after fixing void Int64 decrement, valid void transaction callbacks, and stock-conflict reply handling. Root lint/build pass; full tests report 184 passed, 0 failed, 7 real-Mongo skips.
 - 2026-10-15 — Phase 6b documents the Compose test runner and aligns expiry/sale calculations to shop-local calendar days; Karachi midnight boundary tests cover 19:00 UTC. The replica-set suite now passes alongside this root suite.
 - 2026-10-14 — Phases 2–6 added Docker/API foundation, Mongo auth and Manage Users, catalog/suppliers, stock/purchases, idempotency, FEFO sales, customer ledger, discount limits, split tender, prescription capture, CSV/barcode support, and the threat/design docs. Earlier local test/runtime status is superseded by the verification recorded above and in `docs/MONGO_MIGRATION.md`.
@@ -167,15 +168,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-15T13:50:18.480Z
+Generated at (UTC): 2026-10-15T19:12:28.312Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: wire POS sales to Mongo API
 - feat: wire Settings module to Mongo API
 - feat: wire POS catalog to Mongo API
 - feat: wire Suppliers module to Mongo API
 - docs: refresh generated project context
-- feat: implement Phase 7 business APIs
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
@@ -195,6 +196,7 @@ npm scripts:
 - - `test:stock-alerts`: `tsx --test src/data/stockAlertLogic.test.ts`
 - - `test:pos-catalog`: `tsx --test src/data/posCatalogLogic.test.ts`
 - - `test:sales`: `tsx --test src/data/sales.test.ts`
+- - `test:customer-ledger`: `tsx --test src/data/customerLedger.test.ts`
 - - `test:shop-settings`: `tsx --test src/data/shopSettings.test.ts`
 - - `test:product-filters`: `tsx --test src/components/inventory/productFilterLogic.test.ts`
 - - `test:master-data`: `tsx --test src/components/masterDataSimilarity.test.ts`
@@ -210,7 +212,7 @@ npm scripts:
 - - `test:manage-users-policy`: `tsx --test supabase/functions/manage-users/policy.test.ts`
 - - `test:api-client`: `tsx --test src/api/client.test.ts`
 - - `test:server`: `npm --prefix server test`
-- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:server`
+- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:customer-ledger && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:server`
 
 Dependencies and versions:
 - - `@e965/xlsx` ^0.20.3 (dependency)
@@ -289,6 +291,7 @@ src/
   src/constants/
     src/constants/brand.ts
   src/data/
+    src/data/customerLedger.test.ts
     src/data/mockPharmacyData.ts
     src/data/posCatalog.ts
     src/data/posCatalogLogic.test.ts
@@ -359,6 +362,7 @@ Test files:
 - src/components/inventory/productImportLogic.test.ts
 - src/components/inventory/stockInventoryLogic.test.ts
 - src/components/masterDataSimilarity.test.ts
+- src/data/customerLedger.test.ts
 - src/data/posCatalogLogic.test.ts
 - src/data/returnLogic.test.ts
 - src/data/sales.test.ts
