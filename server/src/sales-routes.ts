@@ -5,6 +5,7 @@ import type { AuditRecord, PharmacyRepository, UserRecord } from './models.js';
 import { requireAuth, requirePermission } from './auth-routes.js';
 import type { TokenConfig } from './auth-crypto.js';
 import type { IdempotencyStore } from './idempotency.js';
+import { timezoneToday } from './business-time.js';
 import {
   customerCreateSchema,
   customerListQuerySchema,
@@ -13,7 +14,6 @@ import {
   normalizedCustomerName,
   postSaleSchema,
   salesHistoryQuerySchema,
-  timezoneToday,
   type CustomerRecord,
   type SaleRecord,
 } from './sales-domain.js';

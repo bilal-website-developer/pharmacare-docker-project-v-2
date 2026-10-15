@@ -223,7 +223,7 @@ export function addUtcDays(date: Date, days: number): Date {
   return result;
 }
 
-export function derivedExpiryStatus(expiryDate: Date, quantity: Long, today = utcDate(new Date())): StockStatus {
+export function derivedExpiryStatus(expiryDate: Date, quantity: Long, today: Date): StockStatus {
   if (quantity.lessThanOrEqual(Long.ZERO)) return 'SOLD_OUT';
   if (utcDate(expiryDate) < today) return 'EXPIRED';
   return utcDate(expiryDate) <= addUtcDays(today, 90) ? 'NEAR_EXPIRY' : 'ACTIVE';

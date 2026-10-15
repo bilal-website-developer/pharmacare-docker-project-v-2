@@ -4,6 +4,7 @@ import test, { after, before } from 'node:test';
 import { Long, MongoClient, ObjectId } from 'mongodb';
 import { createAccessToken } from '../dist/auth-crypto.js';
 import { createApp } from '../dist/app.js';
+import { timezoneToday } from '../dist/business-time.js';
 import { loadConfig } from '../dist/config.js';
 import { MongoStockRepository } from '../dist/stock-repository.js';
 import { MongoSalesRepository } from '../dist/sales-repository.js';
@@ -178,6 +179,10 @@ function audit(actor, event, entityType, entityId) {
   };
 }
 
+function shopToday() {
+  return timezoneToday('Asia/Karachi');
+}
+
 class InjectedFailureStockRepository extends MongoStockRepository {
   failAt = '';
 
@@ -219,7 +224,7 @@ function saleInput(medicineId, unitId) {
 test('Mongo sale transaction rolls back stock and records after an injected mid-transaction failure', { skip: !enabled }, async () => {
   await withFixture(async ({ shopId, actor, input, medicineId, unitId }) => {
     const stockRepository = new MongoStockRepository(client, config.mongoDbName);
-    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'));
+    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'), shopToday());
     const batch = await database.collection('stockBatches').findOne({ shopId, medicineId });
     assert.ok(batch);
 
@@ -241,7 +246,7 @@ test('Mongo sale transaction rolls back stock and records after an injected mid-
 test('Mongo credit sales and customer payments keep distinct unique ledger references', { skip: !enabled }, async () => {
   await withFixture(async ({ shopId, actor, input, medicineId, unitId }) => {
     const stockRepository = new MongoStockRepository(client, config.mongoDbName);
-    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'));
+    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'), shopToday());
     const repository = new MongoSalesRepository(client, config.mongoDbName);
     const customer = await repository.createCustomer(shopId, actor._id, {
       name: 'Ledger Integration Customer',
@@ -287,7 +292,7 @@ test('Mongo credit sales and customer payments keep distinct unique ledger refer
 test('parallel Mongo sales for the last unit allow exactly one complete sale', { skip: !enabled }, async () => {
   await withFixture(async ({ shopId, actor, input, medicineId, unitId }) => {
     const stockRepository = new MongoStockRepository(client, config.mongoDbName);
-    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'));
+    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'), shopToday());
     const batch = await database.collection('stockBatches').findOne({ shopId, medicineId });
     assert.ok(batch);
     await database.collection('stockBatches').updateOne(
@@ -323,7 +328,7 @@ test('Mongo transactions roll back purchase post and void after mid-transaction 
     const repository = new InjectedFailureStockRepository(client, config.mongoDbName);
     repository.failAt = 'purchase.after_movements';
     await assert.rejects(
-      repository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase')),
+      repository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'), shopToday()),
       /INTEGRATION_INJECTED_FAILURE/,
     );
     assert.equal(await database.collection('purchases').countDocuments({ shopId }), 0);
@@ -335,7 +340,7 @@ test('Mongo transactions roll back purchase post and void after mid-transaction 
     assert.equal(supplierAfterFailedPost.payableBalancePaisa.toString(), '0');
 
     repository.failAt = '';
-    const purchase = await repository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'));
+    const purchase = await repository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'), shopToday());
     const stockBeforeVoid = await database.collection('stockBatches').findOne({
       shopId,
       purchaseId: purchase._id,
@@ -442,7 +447,7 @@ test('Mongo unique indexes enforce per-shop medicine codes and barcode claims', 
 test('parallel Mongo stock adjustments allow exactly one request to consume the remaining stock', { skip: !enabled }, async () => {
   await withFixture(async ({ shopId, actor, input, suffix }) => {
     const repository = new MongoStockRepository(client, config.mongoDbName);
-    const purchase = await repository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'));
+    const purchase = await repository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'), shopToday());
     const batchId = purchase.items[0].batchId;
     const shop = await database.collection('shops').findOne({ _id: shopId });
     assert.ok(shop);
@@ -494,7 +499,7 @@ test('parallel Mongo stock adjustments allow exactly one request to consume the 
 test('Mongo idempotency replays the saved successful response without a second stock write', { skip: !enabled }, async () => {
   await withFixture(async ({ shopId, actor, input }) => {
     const repository = new MongoStockRepository(client, config.mongoDbName);
-    const purchase = await repository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'));
+    const purchase = await repository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'), shopToday());
     const batchId = purchase.items[0].batchId;
     const app = createApp(client, config);
     const key = randomUUID();

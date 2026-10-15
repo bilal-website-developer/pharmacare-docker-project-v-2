@@ -6,6 +6,7 @@ import { canViewCost } from './catalog-domain.js';
 import { requireAuth, requirePermission, requireRole } from './auth-routes.js';
 import type { TokenConfig } from './auth-crypto.js';
 import type { IdempotencyStore } from './idempotency.js';
+import { timezoneToday } from './business-time.js';
 import {
   adjustStockSchema,
   objectId,
@@ -33,6 +34,26 @@ function callerFor(request: FastifyRequest, reply: FastifyReply): UserRecord | n
     return null;
   }
   return request.authUser;
+}
+
+async function todayForShop(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  authRepository: PharmacyRepository,
+  user: UserRecord,
+): Promise<Date | null> {
+  const shop = await authRepository.findShopById(user.shopId);
+  if (!shop || shop.status !== 'ACTIVE') {
+    void reply.code(401).send({ error: 'UNAUTHENTICATED' });
+    return null;
+  }
+  try {
+    return timezoneToday(shop.timeZone ?? 'Asia/Karachi');
+  } catch {
+    request.log.error({ event: 'invalid_shop_timezone', shopId: user.shopId.toHexString() });
+    void reply.code(500).send({ error: 'INTERNAL_ERROR' });
+    return null;
+  }
 }
 
 function audit(
@@ -260,11 +281,14 @@ export function registerStockRoutes(
     if (!roleCostView(caller)) return reply.code(403).send({ error: 'FORBIDDEN' });
     const parsed = postPurchaseSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
+    const today = await todayForShop(request, reply, authRepository, caller);
+    if (!today) return;
     try {
       const purchase = await repository.postPurchase(
         parsed.data,
         caller,
         audit(caller, 'purchase.posted', 'purchase'),
+        today,
       );
       return reply.code(201).send(purchaseDetailDto(purchase, true));
     } catch (error) {
@@ -304,8 +328,10 @@ export function registerStockRoutes(
   app.get('/api/stock/overview', { preHandler: stockPreHandler }, async (request, reply) => {
     const caller = callerFor(request, reply);
     if (!caller) return;
-    await repository.refreshStatuses(caller.shopId);
-    const stats = await repository.stockStats(caller.shopId, roleCostView(caller));
+    const today = await todayForShop(request, reply, authRepository, caller);
+    if (!today) return;
+    await repository.refreshStatuses(caller.shopId, today);
+    const stats = await repository.stockStats(caller.shopId, roleCostView(caller), today);
     const { stockValueCostPaisa, expiredValueAtRiskPaisa, ...publicStats } = stats;
     return reply.send({
       ...publicStats,
@@ -318,14 +344,18 @@ export function registerStockRoutes(
     if (!caller) return;
     const parsed = alertQuerySchema.safeParse(request.query);
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
-    return reply.send(await repository.stockAlertsSummary(caller.shopId, parsed.data.limit));
+    const today = await todayForShop(request, reply, authRepository, caller);
+    if (!today) return;
+    return reply.send(await repository.stockAlertsSummary(caller.shopId, parsed.data.limit, today));
   });
 
   app.get('/api/stock/expiry-buckets', { preHandler: stockPreHandler }, async (request, reply) => {
     const caller = callerFor(request, reply);
     if (!caller) return;
-    await repository.refreshStatuses(caller.shopId);
-    return reply.send({ buckets: await repository.expiryBuckets(caller.shopId) });
+    const today = await todayForShop(request, reply, authRepository, caller);
+    if (!today) return;
+    await repository.refreshStatuses(caller.shopId, today);
+    return reply.send({ buckets: await repository.expiryBuckets(caller.shopId, today) });
   });
 
   app.get('/api/stock/batches', { preHandler: stockPreHandler }, async (request, reply) => {
@@ -337,9 +367,14 @@ export function registerStockRoutes(
     if (!showCost && ['cost_asc', 'cost_desc', 'value_asc', 'value_desc'].includes(parsed.data.sort)) {
       return reply.code(403).send({ error: 'FORBIDDEN' });
     }
-    await repository.refreshStatuses(caller.shopId);
+    const today = await todayForShop(request, reply, authRepository, caller);
+    if (!today) return;
+    await repository.refreshStatuses(caller.shopId, today);
     try {
-      const result = await repository.listStock({ ...parsed.data, shopId: caller.shopId, canViewCost: showCost });
+      const result = await repository.listStock(
+        { ...parsed.data, shopId: caller.shopId, canViewCost: showCost },
+        today,
+      );
       return reply.send({
         items: result.rows.map((row) => stockBatchDto(row, showCost)),
         total: result.total,
@@ -372,6 +407,8 @@ export function registerStockRoutes(
     const idParsed = idSchema.safeParse((request.params as { id?: unknown }).id);
     const bodyParsed = adjustStockSchema.safeParse(request.body);
     if (!idParsed.success || !bodyParsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
+    const today = await todayForShop(request, reply, authRepository, caller);
+    if (!today) return;
     const batchId = objectId(idParsed.data);
     try {
       const batch = await repository.adjustStock(
@@ -381,6 +418,7 @@ export function registerStockRoutes(
         Long.fromString(bodyParsed.data.deltaBaseUnits),
         bodyParsed.data.reason,
         audit(caller, 'stock.adjusted', 'stock_batch', batchId),
+        today,
       );
       if (!batch) return reply.code(404).send({ error: 'NOT_FOUND' });
       return reply.send(batchMutationDto(batch));
@@ -396,6 +434,8 @@ export function registerStockRoutes(
     const idParsed = idSchema.safeParse((request.params as { id?: unknown }).id);
     const bodyParsed = writeOffSchema.safeParse(request.body);
     if (!idParsed.success || !bodyParsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
+    const today = await todayForShop(request, reply, authRepository, caller);
+    if (!today) return;
     const batchId = objectId(idParsed.data);
     try {
       const result = await repository.writeOffExpired(
@@ -403,6 +443,7 @@ export function registerStockRoutes(
         batchId,
         caller,
         audit(caller, 'stock_batch.write_off', 'stock_batch', batchId),
+        today,
       );
       if (!result) return reply.code(404).send({ error: 'NOT_FOUND' });
       return reply.send(batchMutationDto(result.batch, result.before));

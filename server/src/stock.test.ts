@@ -9,6 +9,7 @@ import { MemoryRepository } from './test-support/memory-repository.js';
 import { MemoryStockRepository } from './test-support/memory-stock-repository.js';
 import { testConfig } from './test-support/test-config.js';
 import { derivedExpiryStatus, type StockBatchRecord } from './stock-domain.js';
+import { timezoneToday } from './business-time.js';
 import type { UserRecord } from './models.js';
 
 function bearer(user: UserRecord): string {
@@ -103,10 +104,15 @@ function purchaseBody(
 function stockBatch(
   shopId: ObjectId,
   medicineId: ObjectId,
-  values: { batchNumber: string; daysToExpiry: number; quantity: number; status?: StockBatchRecord['status'] },
+  values: {
+    batchNumber: string;
+    daysToExpiry: number;
+    quantity: number;
+    status?: StockBatchRecord['status'];
+    today?: Date;
+  },
 ): StockBatchRecord {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
+  const today = values.today ?? timezoneToday('Asia/Karachi');
   const expiryDate = new Date(today);
   expiryDate.setUTCDate(expiryDate.getUTCDate() + values.daysToExpiry);
   const quantity = Long.fromNumber(values.quantity);
@@ -130,6 +136,17 @@ function stockBatch(
     updatedAt: today,
   };
 }
+
+test('Asia/Karachi expiry day changes at local midnight, not UTC midnight', () => {
+  const beforeLocalMidnight = timezoneToday('Asia/Karachi', new Date('2026-10-14T18:59:59.999Z'));
+  const atLocalMidnight = timezoneToday('Asia/Karachi', new Date('2026-10-14T19:00:00.000Z'));
+  const expiringToday = new Date('2026-10-14T00:00:00.000Z');
+
+  assert.equal(beforeLocalMidnight.toISOString(), '2026-10-14T00:00:00.000Z');
+  assert.equal(atLocalMidnight.toISOString(), '2026-10-15T00:00:00.000Z');
+  assert.equal(derivedExpiryStatus(expiringToday, Long.fromInt(1), beforeLocalMidnight), 'NEAR_EXPIRY');
+  assert.equal(derivedExpiryStatus(expiringToday, Long.fromInt(1), atLocalMidnight), 'EXPIRED');
+});
 
 test('posting purchase commits batches, receipt movements, supplier ledger, counter, and audit together', async () => {
   const { app, client, shop, manager, stock, supplierId, medicine } = await setup();
@@ -505,14 +522,15 @@ test('lazy expiry status refresh uses today and a 90-day near-expiry boundary', 
   const { app, client, manager, stock, shop, medicine } = await setup();
   try {
     const now = new Date();
+    const todayDate = timezoneToday('Asia/Karachi', now);
     stock.seedBatch(stockBatch(shop._id, medicine.medicineId, {
-      batchNumber: 'B-90', daysToExpiry: 90, quantity: 5, status: 'ACTIVE',
+      batchNumber: 'B-90', daysToExpiry: 90, quantity: 5, status: 'ACTIVE', today: todayDate,
     }));
     stock.seedBatch(stockBatch(shop._id, medicine.medicineId, {
-      batchNumber: 'B-91', daysToExpiry: 91, quantity: 5, status: 'NEAR_EXPIRY',
+      batchNumber: 'B-91', daysToExpiry: 91, quantity: 5, status: 'NEAR_EXPIRY', today: todayDate,
     }));
     stock.seedBatch(stockBatch(shop._id, medicine.medicineId, {
-      batchNumber: 'B--1', daysToExpiry: -1, quantity: 5, status: 'ACTIVE',
+      batchNumber: 'B--1', daysToExpiry: -1, quantity: 5, status: 'ACTIVE', today: todayDate,
     }));
     const response = await app.inject({
       method: 'GET', url: '/api/stock/expiry-buckets', headers: headers(manager),
@@ -526,7 +544,6 @@ test('lazy expiry status refresh uses today and a 90-day near-expiry boundary', 
     assert.equal(buckets.find((bucket) => bucket.key === '61-90')!.count, 1);
     assert.equal(buckets.find((bucket) => bucket.key === '90+')!.count, 1);
     assert.equal(buckets.find((bucket) => bucket.key === 'expired')!.count, 1);
-    const todayDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     assert.equal(derivedExpiryStatus(todayDate, Long.fromInt(1), todayDate), 'NEAR_EXPIRY');
     const day91 = new Date(todayDate);
     day91.setUTCDate(day91.getUTCDate() + 91);

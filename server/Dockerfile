@@ -6,6 +6,7 @@ RUN npm ci
 
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
+COPY integration ./integration
 RUN npm run build
 
 FROM node:22-alpine AS production-dependencies

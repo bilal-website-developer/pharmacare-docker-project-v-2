@@ -12,8 +12,9 @@ This file tracks migration phase deliverables and verification. It does not auth
 | 3 | Authentication and Manage Users API | Implemented locally; awaiting owner-run Docker/runtime verification | Auth/session routes, authorization middleware, policy-aligned user routes, bootstrap CLI, and tests are in `server/`. This does not cut over the frontend or implement business modules. |
 | 4 | Catalog, product, and supplier API | Implemented locally; tests/build pass | Mongo/Docker runtime and live route verification are not performed. Route tests use in-memory repositories. |
 | 5 | Purchases and stock API | Implemented locally; source tests pass, owner runtime proof pending | Purchase posting/void, stock queries, adjustments, write-off, alert summary, and lazy expiry status refresh are in `server/`; Mongo transaction/runtime behavior is not verified. |
-| 5b | Mongo replica-set verification and write idempotency | Implemented locally; real-Mongo verification blocked | The integration suite could not connect because Compose Mongo was unhealthy with root-user authentication failure. No Docker files or volumes were changed. Owner selected per-shop IANA timezones, defaulting to `Asia/Karachi`. |
+| 5b | Mongo replica-set verification and write idempotency | Implemented locally; real-Mongo verification blocked | The prior integration attempt could not connect because Compose Mongo was unhealthy with root-user authentication failure. Owner selected per-shop IANA timezones, defaulting to `Asia/Karachi`. |
 | 6 | POS sales and customer APIs | Implemented locally; Mongo runtime verification pending | Transactional sale/FEFO, discounts, payments, customers/khata, prescription capture, history, and local tests are implemented. Replica-set sale tests are present but were skipped because Mongo environment variables/runtime were unavailable. |
+| 6b | Real Mongo verification and timezone consistency | Implemented locally; real-Mongo verification awaits owner-run Compose | Added a Compose test runner for all seven replica-set tests and propagated shop-local “today” through stock, expiry, alert, purchase, adjustment, write-off, and sales logic. Run the documented Docker test steps to verify real Mongo behavior. |
 | 7+ | Remaining business API implementation | Not started | Preserve the Phase 2 Docker verification gate; implement transactions for every multi-document business write. |
 | 12 | Cut-over and Supabase cleanup | Blocked on explicit approval after all manual tests pass | Never delete `supabase/` or migrations; cut-over plan requires owner approval. |
 
@@ -66,8 +67,23 @@ This file tracks migration phase deliverables and verification. It does not auth
 - Split Cash/Card is saved as distinct payment rows. Credit requires a registered customer and is the sole payment method. `Idempotency-Key` remains required for the write routes.
 - Local tests cover FEFO, last-unit concurrency using the in-memory repository, discount caps, tampered totals, rollback hooks, prescription requirements, split payment, customer ledger/payment, and cashier history redaction. The replica-set suite now also contains a real Mongo rollback-on-failure and competing-sale test; both were skipped in this run because Mongo runtime credentials were unavailable.
 - This run's `npm run lint`, `npm test`, and `npm run build` completed successfully. The seven replica-set integration tests in the full test run were skipped; therefore no real Mongo sale transaction, ledger uniqueness, or oversell behavior is verified. The existing Vite `__dirname` and large-chunk warnings remain.
-- “Today” for sales uses the selected shop IANA timezone, defaulting to `Asia/Karachi`. Stock status refresh and stock-list/expiry-bucket calculations still use UTC; align these paths before relying on boundary-day expiry behavior end-to-end.
+- Full `npm test` output: 187 tests total, 180 passed, 0 failed, 7 skipped. All seven skipped cases are the real-replica-set Mongo integration tests; they are not counted as Mongo verification.
+- “Today” for sales and stock operations uses the selected shop IANA timezone, defaulting to `Asia/Karachi`. Phase 6b applies the same value to stock status refresh, overview/list/expiry buckets, stock alerts, purchase batch status, adjustments, and write-off eligibility.
+
+## Phase 6b: run replica-set integration tests
+
+The repository-root `.env` is read by Docker Compose automatically and is git-ignored. Do not print or paste it. The test runner receives these environment variable names from Compose: `MONGO_APP_DB`, `MONGO_APP_USERNAME`, `MONGO_APP_PASSWORD`, `JWT_ACCESS_SECRET`, and `REFRESH_TOKEN_PEPPER`. Starting Mongo/init additionally requires `MONGO_ROOT_USERNAME`, `MONGO_ROOT_PASSWORD`, and `MONGO_REPLICA_KEY`. Use the values already in the local `.env`; do not put them on the command line or in shell history.
+
+From `E:\PHARMCYYYY` in PowerShell, run:
+
+```powershell
+docker compose up -d mongo
+docker compose run --build --rm mongo-init
+docker compose run --build --rm api-test
+```
+
+`api-test` uses the Node/TypeScript build stage with the integration suite included and connects to `mongo:27017` over the private Compose database network. It checks that Mongo reports replica set `rs0`; no Mongo port is published to the host. Expected result is seven passing integration tests and zero skipped. Do not remove volumes or reset credentials if startup fails; share the redacted error output for diagnosis. These Compose commands have not been run as part of this local verification.
 
 ## Expiry timezone decision
 
-**Owner decision:** per-shop IANA timezone, defaulting to `Asia/Karachi`. Sales now derive “today” from the authenticated shop's timezone for sellable-stock checks. Other stock expiry/status paths still use UTC and remain to be aligned; the decision is not fully implemented across the API.
+**Owner decision:** per-shop IANA timezone, defaulting to `Asia/Karachi`. Phase 6b now derives one shop-local calendar date and passes it to sale sellability, stock status refresh, stock stats, expiry buckets, stock lists, stock alerts, purchase receipt status, stock adjustments, and expired write-off checks. The boundary unit test covers Karachi midnight at 19:00 UTC. Real Mongo runtime verification remains an owner-run step above.

@@ -88,6 +88,34 @@ services:
     tmpfs:
       - /tmp
 
+  api-test:
+    image: pharma-care-api-test:local
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      target: build
+    profiles: ["test"]
+    command: ["npm", "run", "test:mongo-integration"]
+    restart: "no"
+    environment:
+      NODE_ENV: test
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_APP_DB: ${MONGO_APP_DB:?MONGO_APP_DB is required}
+      MONGO_APP_USERNAME: ${MONGO_APP_USERNAME:?MONGO_APP_USERNAME is required}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD is required}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      REFRESH_TOKEN_PEPPER: ${REFRESH_TOKEN_PEPPER:?REFRESH_TOKEN_PEPPER is required}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    networks:
+      - database
+    security_opt:
+      - no-new-privileges:true
+
   web:
     image: pharma-care-web:local
     build:

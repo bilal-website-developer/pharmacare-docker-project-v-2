@@ -118,8 +118,7 @@ export class MemoryStockRepository implements StockRepository {
     return { items, suppliers };
   }
 
-  async stockAlertsSummary(shopId: ObjectId, limit: number): Promise<StockAlertsSummary> {
-    const today = utcDate(new Date());
+  async stockAlertsSummary(shopId: ObjectId, limit: number, today: Date): Promise<StockAlertsSummary> {
     const alerts = this.medicines.filter((medicine) =>
       (medicine.shopId as ObjectId).equals(shopId) && medicine.isActive === true,
     ).flatMap((medicine) => {
@@ -158,10 +157,10 @@ export class MemoryStockRepository implements StockRepository {
     };
   }
 
-  async postPurchase(input: PostPurchaseInput, actor: UserRecord, audit: AuditRecord): Promise<PurchaseRecord> {
+  async postPurchase(input: PostPurchaseInput, actor: UserRecord, audit: AuditRecord, today: Date): Promise<PurchaseRecord> {
     return this.transaction(async () => {
       const now = new Date();
-      const purchaseDate = input.purchaseDate ? dateOnly(input.purchaseDate) : utcDate(now);
+      const purchaseDate = input.purchaseDate ? dateOnly(input.purchaseDate) : today;
       const supplierId = objectId(input.supplierId);
       const supplier = this.suppliers.find((record) =>
         (record._id as ObjectId).equals(supplierId)
@@ -237,7 +236,7 @@ export class MemoryStockRepository implements StockRepository {
           quantityRemainingBaseUnits: qty,
           unitCostPaisaPerBaseUnit: longFromBigInt(roundDividePositive(cost, BigInt(factor))),
           mrpPaisaPerBaseUnit: longFromBigInt(roundDividePositive(mrp, BigInt(factor))),
-          status: derivedExpiryStatus(expiryDate, qty, utcDate(now)),
+          status: derivedExpiryStatus(expiryDate, qty, today),
           createdAt: now,
           updatedAt: now,
         });
@@ -389,8 +388,7 @@ export class MemoryStockRepository implements StockRepository {
     return purchase?.shopId.equals(shopId) ? purchase : null;
   }
 
-  async stockStats(shopId: ObjectId, canViewCost: boolean): Promise<StockStats> {
-    const today = utcDate(new Date());
+  async stockStats(shopId: ObjectId, canViewCost: boolean, today: Date): Promise<StockStats> {
     const near30 = addUtcDays(today, 30);
     const activeMedicineIds = new Set(this.medicines.filter((medicine) =>
       (medicine.shopId as ObjectId).equals(shopId) && medicine.isActive === true,
@@ -428,8 +426,7 @@ export class MemoryStockRepository implements StockRepository {
     };
   }
 
-  async expiryBuckets(shopId: ObjectId): Promise<ExpiryBucket[]> {
-    const today = utcDate(new Date());
+  async expiryBuckets(shopId: ObjectId, today: Date): Promise<ExpiryBucket[]> {
     const [d30, d60, d90] = [30, 60, 90].map((days) => addUtcDays(today, days));
     const activeIds = new Set(this.medicines.filter((medicine) =>
       (medicine.shopId as ObjectId).equals(shopId) && medicine.isActive === true,
@@ -465,8 +462,7 @@ export class MemoryStockRepository implements StockRepository {
     }));
   }
 
-  async listStock(options: StockListOptions): Promise<{ rows: StockListRow[]; total: number }> {
-    const today = utcDate(new Date());
+  async listStock(options: StockListOptions, today: Date): Promise<{ rows: StockListRow[]; total: number }> {
     const medicineMap = new Map(this.medicines.filter((medicine) =>
       (medicine.shopId as ObjectId).equals(options.shopId),
     ).map((medicine) => [(medicine._id as ObjectId).toHexString(), medicine]));
@@ -581,6 +577,7 @@ export class MemoryStockRepository implements StockRepository {
     delta: Long,
     reason: string,
     audit: AuditRecord,
+    today: Date,
   ): Promise<StockBatchRecord | null> {
     return this.transaction(async () => {
       const before = this.state.batches.get(batchId.toHexString());
@@ -592,7 +589,7 @@ export class MemoryStockRepository implements StockRepository {
       const after = {
         ...before,
         quantityRemainingBaseUnits: longFromBigInt(nextValue),
-        status: derivedExpiryStatus(before.expiryDate, longFromBigInt(nextValue), utcDate(now)),
+        status: derivedExpiryStatus(before.expiryDate, longFromBigInt(nextValue), today),
         updatedAt: now,
       };
       this.state.batches.set(batchId.toHexString(), after);
@@ -616,12 +613,13 @@ export class MemoryStockRepository implements StockRepository {
     batchId: ObjectId,
     actor: UserRecord,
     audit: AuditRecord,
+    today: Date,
   ): Promise<{ before: Long; batch: StockBatchRecord } | null> {
     return this.transaction(async () => {
       const before = this.state.batches.get(batchId.toHexString());
       if (!before || !before.shopId.equals(shopId)) return null;
       const now = new Date();
-      if (utcDate(before.expiryDate) >= utcDate(now)) throw new Error('BATCH_NOT_EXPIRED');
+      if (utcDate(before.expiryDate) >= today) throw new Error('BATCH_NOT_EXPIRED');
       if (before.quantityRemainingBaseUnits.lessThanOrEqual(Long.ZERO)) throw new Error('BATCH_HAS_NO_REMAINING_STOCK');
       const batch = { ...before, quantityRemainingBaseUnits: Long.ZERO, status: 'SOLD_OUT' as const, updatedAt: now };
       this.state.batches.set(batchId.toHexString(), batch);
@@ -641,7 +639,7 @@ export class MemoryStockRepository implements StockRepository {
     });
   }
 
-  async refreshStatuses(shopId: ObjectId, today = utcDate(new Date())): Promise<void> {
+  async refreshStatuses(shopId: ObjectId, today: Date): Promise<void> {
     for (const [id, batch] of this.state.batches) {
       if (!batch.shopId.equals(shopId) || !['ACTIVE', 'NEAR_EXPIRY'].includes(batch.status)) continue;
       const status = derivedExpiryStatus(batch.expiryDate, batch.quantityRemainingBaseUnits, today);

@@ -37,7 +37,7 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - Other feature screens in `src/components/` include Dashboard, Reports, Suppliers, Cash Book, Controlled Drugs, Master Data, and print-request administration.
 - `src/utils/`, `src/types/`, `src/data/`: reusable logic, TypeScript domain shapes, and mock pharmacy data.
 - `supabase/migrations/`, `supabase/functions/`, `supabase/baseline/`: database migrations, Edge Functions, and a supplied schema snapshot.
-- `server/`: Fastify/TypeScript API, MongoDB replica-set initializer, auth/user/catalog/purchase/stock/sales/customer routes, transaction repositories, and the first-run super-admin CLI. Returns, cash book, expenses, reports, and print workflows remain unimplemented.
+- `server/`: Fastify/TypeScript API, MongoDB replica-set initializer, auth/user/catalog/purchase/stock/sales/customer routes, transaction repositories, first-run super-admin CLI, and a Compose-only real-Mongo test runner. Returns, cash book, expenses, reports, and print workflows remain unimplemented.
 - `docker/`, `docker-compose.yml`, `Dockerfile`: local Mongo/API/web container setup and Nginx configuration. See `docs/DOCKER.md`.
 - `docs/`: database references, `MASTER_PLAN.md`, `MULTI_SHOP_FULL_PLAN.md`, execution progress, redesign notes, and this context.
 - `scripts/`, `.githooks/`: context generation and commit-hook tooling.
@@ -68,7 +68,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - Persisted money columns and calculation fields use integer paisa; `sale_items.discount_percent` is numeric.
 - Batch sale allocation in `src/utils/fefo.ts` uses FEFO: positive eligible stock only, `ACTIVE`/`NEAR_EXPIRY`, expiry today or later, then received date and ID for tie-breaking. It rejects an insufficient allocation rather than returning a partial sale. Server-side enforcement depends on the deployed RPC/schema and must be verified there.
 - Expiry is a stock-batch field, not a medicine/product-master field. Product setup does not require expiry, but every purchase batch currently requires a future expiry date; no-expiry batches are not supported by the schema or sale/alert rules.
-- The owner selected per-shop IANA timezones, defaulting to `Asia/Karachi`. POS sellability derives “today” from the shop timezone; stock status refresh and stock list/bucket calculations still use UTC and need a follow-up to align them. `NEAR_EXPIRY` includes expiry through 90 days from today.
+- Per-shop IANA timezones default to `Asia/Karachi`; sales and stock expiry/status/alert calculations now receive one shop-local “today” value. The Karachi midnight boundary is tested at 19:00 UTC. Real Mongo behavior remains unverified pending the documented Compose test run.
 - Do not permit negative stock. Verify the server transaction and constraints as well as frontend allocation before relying on this in production.
 - Stock alerts use sellable stock from positive, unexpired (`expiry_date >= current_date`), `ACTIVE`/`NEAR_EXPIRY` batches for active medicines. Alert low/out counts require `min_stock_alert > 0`; the alert RPC returns no cost, MRP, supplier, or cost-derived value and is available to every active, non-deleted profile regardless of module permission. The existing Products `out_of_stock` KPI does not apply the positive-reorder-threshold condition, so its count may exceed alert out counts. Owner-supplied live results show `stock_alerts_summary` exists with anon EXECUTE false/authenticated true; no migration-history result or end-to-end behavior was supplied.
 - Cost and profit/margin are internal data, not Pharmacy Memo print fields. Receipt rendering displays sale amounts/totals and is styled black on white. Do not add cost, purchase price, profit, or margin to customer-facing slips.
@@ -93,7 +93,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Current status
 
-- **Current checkout:** branch `feature/mongo-migration`. Phases 0–6 are implemented locally; Phase 6 adds transactional POS sales, customer/khata APIs, and sales history. Local source tests do not prove MongoDB behavior; replica-set integration tests are present but skipped without configured Mongo credentials, and Docker/runtime proof remains pending. Frontend cut-over is not performed; React screens remain on Supabase.
+- **Current checkout:** branch `feature/mongo-migration`. Phases 0–6b are implemented locally. Phase 6b adds a Compose test runner for the seven replica-set tests and aligns sale/stock expiry logic to shop-local “today.” `npm test` reports 187 tests: 180 passed, 0 failed, 7 skipped (all seven real-Mongo integration tests); local tests do not prove MongoDB behavior. Run the documented Compose steps in `docs/MONGO_MIGRATION.md` for real-Mongo proof. Phase 7 is not started. Frontend cut-over is not performed; React screens remain on Supabase.
 - **Added; migration owner-reported applied and RPC ACL checked:** Header Stock Alert Bell, accessible alert panel, per-user unseen indicators, permission-aware Products/Stock Inventory navigation, and stock-change refresh events. `stock_alerts_summary(integer)` and its rollback are in `supabase/migrations/20261013140000_stock_alerts_summary.sql` and `supabase/rollback/rollback_20261013140000_stock_alerts_summary.sql`; alert counts/data and UI behavior still need runtime testing.
 - **Verified in history:** The low-stock alert feature is committed as `da7ed5d` on `feature/low-stock-alerts`; it is present in that commit, not missing from the repository history.
 - **Fixed in `b62b547`:** Product-controlled label text is HTML-escaped in generated print markup using the shared receipt helper; hostile markup and quoted attribute payloads are covered by tests. The existing receipt/memo rendering behavior is unchanged.
@@ -112,7 +112,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - **W6 TypeScript baseline:** `strict` and `noUnusedParameters` are enabled after both command-line measurements returned zero diagnostics. `noUnusedLocals` remains disabled because its 16 remaining diagnostics are in preserved components and the retained `RepositoryReviewView` import. The broader source cleanup is committed as `cce45bb`; ESLint packages/config remain pending owner approval and TypeScript 7 compatibility review. Details and release-date evidence are in `docs/EXECUTION_PROGRESS.md`.
 - **W7 client bundle optimization:** Sidebar screens and modal views load on demand (Dashboard, login, and shell remain eager); Purchase History XLSX, receipt print workflow, and barcode label code are deferred until used. Loading and retryable screen-error states are present. First-load production gzip measured 172.26 kB, down from 418.24 kB and below the 200 kB target. Lint, tests, and build pass; see `docs/EXECUTION_PROGRESS.md` for emitted chunk sizes. Physical slow/offline-network and route-refresh checks remain manual.
 - **Security ACL plan:** Owner-reported live ACL audit found `stock_batches` and the other four 4c cost-bearing tables revoked; a later `stock_batches` grant had undone its revoke once. Reassert revokes in the new lockdown migration. Staged files A-D and rollback scripts are proposals only and have not been applied. The owner reports profile DML already revoked; file D reasserts that state.
-- **Next:** Continue remaining business API phases only after owner-run Docker/HTTP health verification. Track gates in `docs/MONGO_MIGRATION.md`; keep Supabase paths intact until the separately approved cut-over phase.
+- **Next:** Complete owner-run Phase 6b Mongo replica-set verification; do not start Phase 7 until explicitly requested. Keep Supabase paths intact until the separately approved cut-over phase.
 
 ## Known issues and Later
 
@@ -149,17 +149,15 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
-- 2026-10-14 — Implemented Phase 5b replica-set integration tests and hashed idempotency for authenticated business writes; documented auth-route exclusion, crash window, and timezone decision options. Local lint, tests, and build pass; real Mongo integration is blocked by the unhealthy Mongo auth check.
-- 2026-10-14 — Implemented Phase 6 transactional POS sale, FEFO allocation, role/flat discount caps, split tender, customer credit ledger/payment, prescription capture, and sales history. Local lint, full tests, and build pass; seven Mongo integration tests skip because Mongo credentials/runtime are unavailable. Sales use the selected shop timezone; stock expiry queries still use UTC.
+- 2026-10-15 — Phase 6b adds a Compose test runner and documented `.env`-backed command for seven real-Mongo integration tests, and aligns stock/sale expiry calculations to shop-local calendar days. Karachi midnight boundary and local checks pass (187 tests: 180 passed, 0 failed, 7 Mongo integration tests skipped); real Mongo execution awaits owner-run proof.
+- 2026-10-14 — Phases 5b/6 implemented Mongo idempotency, transactional sales, FEFO, role discount caps, split tender, customer credit, prescription capture, and sales history. Local tests/build passed; Mongo integration/runtime verification remained blocked.
 - 2026-10-14 — Implemented Phase 4 catalog/supplier APIs, EAN-13 registry, product CSV import/export, trash/restore, and role-based cost DTO filtering; updated design/tracker for separate `medicineUnits`. Root lint, full tests, and build pass locally; Mongo/Docker runtime and frontend cut-over remain unverified/not performed.
 - 2026-10-14 — Implemented Phase 3 Mongo-backed auth, rotating hashed refresh sessions, lockout, authorization, Manage Users policy, audit entries, and interactive super-admin bootstrap. Runtime remains unverified.
 - 2026-10-14 — Added Phase 2 Docker Compose topology, MongoDB keyfile/replica-set initialization, least-privilege app user/index initialization, Nginx frontend/API proxy, secret generator, and Fastify Mongo health skeleton. Lint, 126 tests, build, API audit, Compose syntax, and PowerShell syntax passed; no container was started. Owner-run Compose/HTTP verification remains pending.
 - 2026-10-14 — Drafted Phase 1 Mongo collection/API design and top-15 threat model; added the phase tracker. Documentation only; implementation and security controls await owner approval and verification.
 - 2026-10-14 — Created `feature/mongo-migration` from the owner-confirmed clean `security/revoke-public-execute` checkout and completed read-only Phase 0 source inventory in `docs/MONGO_MIGRATION_INVENTORY.md`. No SQL, live database, application code, or deployment was changed; live grants/schema and runtime behavior remain unverified.
 - 2026-10-14 — Read-only code/database/security/logic/returns audit recorded in `docs/audit/`. Local lint, 18 test scripts (122 tests), build, and production dependency audit pass. No SQL, deployment, demo data, or application-code change was made for the audit. Key current risks: missing active-POS prescription enforcement, forward-folder rollback files, dashboard sample stock KPIs, in-memory Cash Book, and return/report settlement gaps.
-- 2026-10-14 — Clarified the return-audit count reconciliation: the earlier aggregate did not have a recoverable numbered checklist, and the only supported row-level status change is the sale-void interaction moving from PARTIAL to MISSING. Documentation only; no code, SQL, or deployment.
-- 2026-10-14 — Updated audit findings from owner-supplied live ACL/RLS output: direct return-table privileges are false with RLS enabled; anon EXECUTE is true on 16 SECURITY DEFINER functions; authenticated table grants need policy/column review. Return migration ledger status and runtime authorization remain unverified. No SQL, code, or deployment.
-- 2026-10-14 — Owner reports running the anon-EXECUTE migration; the three post-migration query results and app-test outcome were not included. DB-06 remains open pending verification that the first query returns no rows. Other customer-data readiness findings remain open. Documentation only in this workspace.
+- 2026-10-14 — Consolidated audit follow-ups remain documented in `docs/audit/`; database migration application, live authorization, return behavior, and staging evidence require owner-supplied verification.
 - 2026-10-13 — Recorded prior POS/catalog, FEFO sale-unit, return-policy, stock-alert, multi-shop-plan, type-safety, and bundle-splitting work. Legacy POS sale/return persistence and authenticated live UI remained unverified; details and SQL status are in the audit and migration docs.
 - 2026-10-13 — Escaped hostile text in product-label printing and added tests; readiness review documented remaining persistence gaps. No SQL or deployment was performed.
 - 2026-10-12 — Grouped barcode/label/scanner, trash and print-approval, POS discount, Manage Users, and Products-filter work. Supabase migrations and Edge Function deployment remain separately gated.
@@ -182,15 +180,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-14T19:00:56.692Z
+Generated at (UTC): 2026-10-15T06:45:54.511Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: implement POS sales and customer APIs
 - docs: record expiry timezone decision
 - feat: add Mongo write idempotency checks
 - feat: implement Mongo stock and purchasing API
 - docs: record Phase 4 catalog API
-- bro
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`

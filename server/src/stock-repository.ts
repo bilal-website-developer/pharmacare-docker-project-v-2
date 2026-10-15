@@ -75,18 +75,18 @@ export interface StockRepository {
     items: Record<string, unknown>[];
     suppliers: Array<{ id: string; name: string; contact: string }>;
   }>;
-  stockAlertsSummary(shopId: ObjectId, limit: number): Promise<StockAlertsSummary>;
-  postPurchase(input: PostPurchaseInput, actor: UserRecord, audit: AuditRecord): Promise<PurchaseRecord>;
+  stockAlertsSummary(shopId: ObjectId, limit: number, today: Date): Promise<StockAlertsSummary>;
+  postPurchase(input: PostPurchaseInput, actor: UserRecord, audit: AuditRecord, today: Date): Promise<PurchaseRecord>;
   voidPurchase(shopId: ObjectId, purchaseId: ObjectId, actor: UserRecord, reason: string, audit: AuditRecord): Promise<PurchaseRecord | null>;
   listPurchases(options: PurchaseListOptions): Promise<{ rows: PurchaseRecord[]; total: number }>;
   getPurchase(shopId: ObjectId, purchaseId: ObjectId): Promise<PurchaseRecord | null>;
-  stockStats(shopId: ObjectId, canViewCost: boolean): Promise<StockStats>;
-  expiryBuckets(shopId: ObjectId): Promise<ExpiryBucket[]>;
-  listStock(options: StockListOptions): Promise<{ rows: StockListRow[]; total: number }>;
+  stockStats(shopId: ObjectId, canViewCost: boolean, today: Date): Promise<StockStats>;
+  expiryBuckets(shopId: ObjectId, today: Date): Promise<ExpiryBucket[]>;
+  listStock(options: StockListOptions, today: Date): Promise<{ rows: StockListRow[]; total: number }>;
   listAdjustments(options: StockLogOptions): Promise<{ rows: StockMovementRow[]; total: number }>;
-  adjustStock(shopId: ObjectId, batchId: ObjectId, actor: UserRecord, delta: Long, reason: string, audit: AuditRecord): Promise<StockBatchRecord | null>;
-  writeOffExpired(shopId: ObjectId, batchId: ObjectId, actor: UserRecord, audit: AuditRecord): Promise<{ before: Long; batch: StockBatchRecord } | null>;
-  refreshStatuses(shopId: ObjectId, today?: Date): Promise<void>;
+  adjustStock(shopId: ObjectId, batchId: ObjectId, actor: UserRecord, delta: Long, reason: string, audit: AuditRecord, today: Date): Promise<StockBatchRecord | null>;
+  writeOffExpired(shopId: ObjectId, batchId: ObjectId, actor: UserRecord, audit: AuditRecord, today: Date): Promise<{ before: Long; batch: StockBatchRecord } | null>;
+  refreshStatuses(shopId: ObjectId, today: Date): Promise<void>;
 }
 
 function isDuplicate(error: unknown): boolean {
@@ -197,8 +197,7 @@ export class MongoStockRepository implements StockRepository {
     };
   }
 
-  async stockAlertsSummary(shopId: ObjectId, limit: number): Promise<StockAlertsSummary> {
-    const today = utcDate(new Date());
+  async stockAlertsSummary(shopId: ObjectId, limit: number, today: Date): Promise<StockAlertsSummary> {
     const medicines = await this.database.collection('medicines').find({
       shopId, isActive: true, deletedAt: null,
     }).toArray();
@@ -244,14 +243,13 @@ export class MongoStockRepository implements StockRepository {
     };
   }
 
-  async postPurchase(input: PostPurchaseInput, actor: UserRecord, audit: AuditRecord): Promise<PurchaseRecord> {
+  async postPurchase(input: PostPurchaseInput, actor: UserRecord, audit: AuditRecord, today: Date): Promise<PurchaseRecord> {
     const session = this.client.startSession();
     let posted: PurchaseRecord | undefined;
     try {
       await session.withTransaction(async () => {
         const now = new Date();
-        const purchaseDate = input.purchaseDate ? dateOnly(input.purchaseDate) : utcDate(now);
-        const today = utcDate(now);
+        const purchaseDate = input.purchaseDate ? dateOnly(input.purchaseDate) : today;
         if (!input.items.length || input.items.length > 200) throw new Error('INVALID_PURCHASE');
         if (input.items.some((item) => dateOnly(item.expiryDate) <= purchaseDate)) throw new Error('EXPIRY_NOT_AFTER_PURCHASE_DATE');
 
@@ -613,8 +611,7 @@ export class MongoStockRepository implements StockRepository {
     return this.purchaseCollection().findOne({ _id: purchaseId, shopId });
   }
 
-  async stockStats(shopId: ObjectId, canViewCost: boolean): Promise<StockStats> {
-    const today = utcDate(new Date());
+  async stockStats(shopId: ObjectId, canViewCost: boolean, today: Date): Promise<StockStats> {
     const near30 = addUtcDays(today, 30);
     const activeIds = new Set((await this.database.collection('medicines')
       .find({ shopId, isActive: true, deletedAt: null }, { projection: { _id: 1 } })
@@ -653,8 +650,7 @@ export class MongoStockRepository implements StockRepository {
     };
   }
 
-  async expiryBuckets(shopId: ObjectId): Promise<ExpiryBucket[]> {
-    const today = utcDate(new Date());
+  async expiryBuckets(shopId: ObjectId, today: Date): Promise<ExpiryBucket[]> {
     const boundaries = [addUtcDays(today, 30), addUtcDays(today, 60), addUtcDays(today, 90)];
     const activeIds = new Set((await this.database.collection('medicines')
       .find({ shopId, isActive: true, deletedAt: null }, { projection: { _id: 1 } })
@@ -695,8 +691,7 @@ export class MongoStockRepository implements StockRepository {
     }));
   }
 
-  async listStock(options: StockListOptions): Promise<{ rows: StockListRow[]; total: number }> {
-    const today = utcDate(new Date());
+  async listStock(options: StockListOptions, today: Date): Promise<{ rows: StockListRow[]; total: number }> {
     const search = options.search?.trim();
     const sortField: Record<StockBatchQuery['sort'], string> = {
       medicine_asc: 'medicine.name', medicine_desc: 'medicine.name',
@@ -946,6 +941,7 @@ export class MongoStockRepository implements StockRepository {
     delta: Long,
     reason: string,
     audit: AuditRecord,
+    today: Date,
   ): Promise<StockBatchRecord | null> {
     const session = this.client.startSession();
     let updated: StockBatchRecord | null = null;
@@ -958,7 +954,7 @@ export class MongoStockRepository implements StockRepository {
         const nextQty = BigInt(before.quantityRemainingBaseUnits.toString()) + BigInt(delta.toString());
         if (nextQty < 0n || nextQty > maxLong()) throw new Error('INSUFFICIENT_STOCK');
         const nextQuantity = longFromBigInt(nextQty);
-        const status = derivedExpiryStatus(before.expiryDate, nextQuantity, utcDate(now));
+        const status = derivedExpiryStatus(before.expiryDate, nextQuantity, today);
         const result = await this.batchCollection().updateOne(
           {
             _id: batchId,
@@ -1009,13 +1005,13 @@ export class MongoStockRepository implements StockRepository {
     batchId: ObjectId,
     actor: UserRecord,
     audit: AuditRecord,
+    today: Date,
   ): Promise<{ before: Long; batch: StockBatchRecord } | null> {
     const session = this.client.startSession();
     let outcome: { before: Long; batch: StockBatchRecord } | null = null;
     try {
       await session.withTransaction(async () => {
         const now = new Date();
-        const today = utcDate(now);
         const before = await this.batchCollection().findOne({ _id: batchId, shopId }, { session });
         if (!before) return;
         if (utcDate(before.expiryDate) >= today) throw new Error('BATCH_NOT_EXPIRED');
@@ -1065,7 +1061,7 @@ export class MongoStockRepository implements StockRepository {
     }
   }
 
-  async refreshStatuses(shopId: ObjectId, today = utcDate(new Date())): Promise<void> {
+  async refreshStatuses(shopId: ObjectId, today: Date): Promise<void> {
     const batches = this.batchCollection();
     const activeExpiryStatuses = { $in: ['ACTIVE', 'NEAR_EXPIRY'] as const };
     await batches.updateMany(
