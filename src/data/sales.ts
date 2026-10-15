@@ -348,6 +348,7 @@ function isCompletedSale(value: unknown): value is CompletedSale {
     && isString(value.invoiceNumber)
     && isString(value.timestamp)
     && isString(value.cashierName)
+    && (value.status === undefined || value.status === 'COMPLETED' || value.status === 'VOID')
     && (value.customerId === null || isString(value.customerId))
     && isString(value.customerName)
     && isString(value.customerPhone)
@@ -410,6 +411,7 @@ function parseSaleHistory(value: unknown): CompletedSale | null {
     invoiceNumber: value.invoiceNumber,
     timestamp: value.timestamp,
     cashierName: value.cashierName,
+    ...(parseSaleStatus(value.status) ? { status: parseSaleStatus(value.status) } : {}),
     customerId: value.customerId,
     customerName: value.customerName,
     customerPhone: value.customerPhone,
@@ -423,6 +425,118 @@ function parseSaleHistory(value: unknown): CompletedSale | null {
     changePaisa: value.changePaisa,
   };
   return isCompletedSale(sale) ? sale : null;
+}
+
+function parseSaleStatus(value: unknown): CompletedSale['status'] | undefined {
+  if (value === 'COMPLETED' || value === 'completed') return 'COMPLETED';
+  if (value === 'VOID' || value === 'void') return 'VOID';
+  return undefined;
+}
+
+function parseApiHistorySale(value: unknown): CompletedSale | null {
+  const saleKeys = [
+    'id', 'invoiceNumber', 'timestamp', 'cashierName', 'customerId', 'customerName', 'customerPhone',
+    'subtotalPaisa', 'discountPaisa', 'roundingPaisa', 'totalPaisa', 'amountTenderedPaisa', 'changePaisa',
+    'paymentMethod', 'status', 'itemCount', 'items',
+  ];
+  if (!isRecord(value) || !hasExactKeys(value, saleKeys)
+    || !isString(value.id) || !isString(value.invoiceNumber) || !isString(value.timestamp)
+    || !isString(value.cashierName) || !(value.customerId === null || isString(value.customerId))
+    || !isString(value.customerName) || !isString(value.customerPhone)
+    || !(value.status === 'COMPLETED' || value.status === 'VOID')
+    || !Number.isSafeInteger(value.itemCount) || !Array.isArray(value.items)
+    || Number(value.itemCount) !== value.items.length) return null;
+
+  const paymentMethod = value.paymentMethod === 'CASH' ? PaymentMethod.CASH
+    : value.paymentMethod === 'CARD' ? PaymentMethod.EASYPAISA
+      : value.paymentMethod === 'CREDIT' ? PaymentMethod.CREDIT
+        : value.paymentMethod === 'SPLIT' ? PaymentMethod.SPLIT
+          : null;
+  const subtotalPaisa = apiPaisaNumber(value.subtotalPaisa);
+  const discountPaisa = apiPaisaNumber(value.discountPaisa);
+  const roundingPaisa = apiPaisaNumber(value.roundingPaisa, true);
+  const totalPaisa = apiPaisaNumber(value.totalPaisa);
+  const amountTenderedPaisa = apiPaisaNumber(value.amountTenderedPaisa);
+  const changePaisa = apiPaisaNumber(value.changePaisa);
+  if (!paymentMethod || subtotalPaisa === null || discountPaisa === null || roundingPaisa === null
+    || totalPaisa === null || amountTenderedPaisa === null || changePaisa === null) return null;
+
+  const items: CartItem[] = [];
+  for (const rawItem of value.items) {
+    const itemKeys = [
+      'id', 'medicineId', 'unitId', 'productName', 'genericName', 'drugClass', 'unitName',
+      'conversionFactor', 'quantityInUnit', 'quantityBaseUnits', 'pricePaisaPerUnit',
+      'lineDiscountPaisa', 'lineTotalPaisa', 'batchAllocations',
+    ];
+    if (!isRecord(rawItem) || !hasExactKeys(rawItem, itemKeys)
+      || !isString(rawItem.medicineId) || !isString(rawItem.productName)
+      || !isString(rawItem.genericName) || !isDrugClass(rawItem.drugClass)
+      || !isString(rawItem.unitId) || !isString(rawItem.unitName)
+      || !Number.isSafeInteger(rawItem.conversionFactor) || Number(rawItem.conversionFactor) <= 0
+      || !isPositiveInteger(rawItem.quantityInUnit) || !Array.isArray(rawItem.batchAllocations)) return null;
+
+    const quantitySmallestUnit = apiPaisaNumber(rawItem.quantityBaseUnits);
+    const mrpPaisaPerUnit = apiPaisaNumber(rawItem.pricePaisaPerUnit);
+    const lineDiscountPaisa = apiPaisaNumber(rawItem.lineDiscountPaisa);
+    const lineTotalPaisa = apiPaisaNumber(rawItem.lineTotalPaisa);
+    if (quantitySmallestUnit === null || quantitySmallestUnit <= 0
+      || mrpPaisaPerUnit === null || lineDiscountPaisa === null || lineTotalPaisa === null) return null;
+
+    const batchAllocations: BatchAllocation[] = [];
+    for (const rawAllocation of rawItem.batchAllocations) {
+      if (!isRecord(rawAllocation)
+        || !hasExactKeys(rawAllocation, ['batchId', 'batchNumber', 'expiryDate', 'quantityBaseUnits'])
+        || !isString(rawAllocation.batchId) || !isString(rawAllocation.batchNumber)
+        || !isString(rawAllocation.expiryDate)) return null;
+      const quantity = apiPaisaNumber(rawAllocation.quantityBaseUnits);
+      if (quantity === null || quantity <= 0) return null;
+      batchAllocations.push({
+        batchId: rawAllocation.batchId,
+        batchNumber: rawAllocation.batchNumber,
+        expiryDate: rawAllocation.expiryDate,
+        quantitySmallestUnit: quantity,
+      });
+    }
+    const firstAllocation = batchAllocations[0];
+    if (!firstAllocation) return null;
+    items.push({
+      productId: rawItem.medicineId,
+      productName: rawItem.productName,
+      genericName: rawItem.genericName,
+      batchId: firstAllocation.batchId,
+      batchNumber: firstAllocation.batchNumber,
+      expiryDate: firstAllocation.expiryDate,
+      drugClass: rawItem.drugClass,
+      unitId: rawItem.unitId,
+      unitName: rawItem.unitName,
+      conversionFactor: Number(rawItem.conversionFactor),
+      quantityInUnit: rawItem.quantityInUnit,
+      mrpPaisaPerUnit,
+      costPaisaPerUnit: null,
+      discountPercent: 0,
+      lineTotalPaisa,
+      batchAllocations,
+    });
+  }
+
+  return {
+    id: value.id,
+    invoiceNumber: value.invoiceNumber,
+    timestamp: value.timestamp,
+    cashierName: value.cashierName,
+    status: value.status,
+    ...(value.customerId ? { customerId: value.customerId } : {}),
+    customerName: value.customerName,
+    customerPhone: value.customerPhone,
+    items,
+    subtotalPaisa,
+    discountPaisa,
+    totalPaisa,
+    roundingPaisa,
+    paymentMethod,
+    amountTenderedPaisa,
+    changePaisa,
+  };
 }
 
 export async function callSupabaseRpc<T>(
@@ -605,6 +719,33 @@ export async function postSale(input: PostSaleInput): Promise<CompletedSale> {
 }
 
 export async function loadSalesHistory(limit = 100): Promise<CompletedSale[]> {
+  if (getBackend() === 'api') {
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new Error('Sales history limit must be a positive integer.');
+    }
+    const requested = Math.min(limit, 500);
+    const pageSize = Math.min(requested, 200);
+    const sales: CompletedSale[] = [];
+    let page = 1;
+    let total = Number.MAX_SAFE_INTEGER;
+    while (sales.length < requested && sales.length < total) {
+      const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      const response = await apiRequest<unknown>(`/api/sales/history?${query.toString()}`);
+      if (!isRecord(response) || !hasExactKeys(response, ['items', 'total', 'page', 'pageSize'])
+        || !Array.isArray(response.items) || !Number.isSafeInteger(response.total) || Number(response.total) < 0
+        || response.page !== page || response.pageSize !== pageSize) {
+        throw new Error('The sales history service returned an invalid response.');
+      }
+      const parsed = response.items.map(parseApiHistorySale);
+      if (parsed.some((sale) => sale === null) || (parsed.length === 0 && sales.length < Number(response.total))) {
+        throw new Error('The sales history service returned an invalid response.');
+      }
+      sales.push(...parsed.filter((sale): sale is CompletedSale => sale !== null));
+      total = Number(response.total);
+      page += 1;
+    }
+    return sales.slice(0, requested);
+  }
   const raw = await callSupabaseRpc('sales_history', { p_limit: limit }, 'Could not load sales history.', (value): value is unknown[] =>
     Array.isArray(value));
   const parsed = raw.map(parseSaleHistory);

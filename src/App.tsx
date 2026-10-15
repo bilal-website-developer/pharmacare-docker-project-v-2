@@ -703,17 +703,18 @@ function PharmacyWorkspace({
   };
 
   // Calculations for End of Day modal
+  const postedSales = completedSales.filter((sale) => sale.status !== 'VOID');
   const cashSalesPKR =
-    completedSales
+    postedSales
       .filter((s) => s.paymentMethod === 'CASH')
       .reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
 
   const creditSalesPKR =
-    completedSales
+    postedSales
       .filter((s) => s.paymentMethod === 'CREDIT')
       .reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
 
-  const totalSalesPKR = completedSales.reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
+  const totalSalesPKR = postedSales.reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
 
   const expensesPKR =
     transactions
@@ -724,7 +725,7 @@ function PharmacyWorkspace({
     sale.items.every((item) => item.costPaisaPerUnit !== null)
   );
   const totalCostPKR = hasCompleteSaleCosts
-    ? completedSales.reduce((sum, sale) =>
+    ? postedSales.reduce((sum, sale) =>
         sum + sale.items.reduce(
           (itemSum, item) => itemSum + (item.costPaisaPerUnit ?? 0) * item.quantityInUnit,
           0,

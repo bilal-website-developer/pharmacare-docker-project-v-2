@@ -170,6 +170,7 @@ export interface CompletedSale {
   invoiceNumber: string;
   timestamp: string;
   cashierName: string;
+  status?: 'COMPLETED' | 'VOID';
   customerName?: string;
   customerPhone?: string;
   customerId?: string;

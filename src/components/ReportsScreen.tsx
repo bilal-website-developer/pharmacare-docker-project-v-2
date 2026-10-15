@@ -10,12 +10,13 @@ interface ReportsScreenProps {
 export const ReportsScreen: React.FC<ReportsScreenProps> = ({ sales, currentRole }) => {
   const canSeeProfit = currentRole === UserRole.ADMIN || currentRole === UserRole.SUPER_ADMIN || currentRole === UserRole.ACCOUNTANT;
 
-  const totalRevenuePaisa = sales.reduce((sum, s) => sum + s.totalPaisa, 0);
-  const hasCompleteSaleCosts = sales.every((sale) =>
+  const postedSales = sales.filter((sale) => sale.status !== 'VOID');
+  const totalRevenuePaisa = postedSales.reduce((sum, s) => sum + s.totalPaisa, 0);
+  const hasCompleteSaleCosts = postedSales.every((sale) =>
     sale.items.every((item) => item.costPaisaPerUnit !== null)
   );
   const totalCostPaisa = canSeeProfit && hasCompleteSaleCosts
-    ? sales.reduce((sum, sale) =>
+    ? postedSales.reduce((sum, sale) =>
         sum + sale.items.reduce(
           (itemSum, item) => itemSum + (item.costPaisaPerUnit ?? 0) * item.quantityInUnit,
           0,
@@ -57,7 +58,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ sales, currentRole
 
         <div className="report-stat-card bg-white p-5 rounded-xl border border-emerald-200 shadow-xs">
           <span className="text-xs font-semibold text-emerald-700">Invoices Processed</span>
-          <div className="report-stat-value text-2xl font-bold font-mono text-emerald-950 mt-1">{sales.length}</div>
+          <div className="report-stat-value text-2xl font-bold font-mono text-emerald-950 mt-1">{postedSales.length}</div>
           <span className="text-[11px] text-emerald-600">Sequential receipt numbers</span>
         </div>
 
@@ -113,6 +114,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ sales, currentRole
                 <tr key={sale.id} className="sales-history-row hover:bg-emerald-50/30">
                   <td className="py-2.5 px-3 font-mono font-bold text-emerald-800">
                     {sale.invoiceNumber}
+                    {sale.status === 'VOID' && (
+                      <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 font-sans text-[9px] font-bold text-red-700">VOID</span>
+                    )}
                   </td>
                   <td className="py-2.5 px-3 text-slate-600 text-[11px]">{sale.timestamp}</td>
                   <td className="py-2.5 px-3 font-medium">{sale.customerName}</td>
