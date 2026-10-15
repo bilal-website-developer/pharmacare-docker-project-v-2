@@ -14,6 +14,7 @@ import {
   Zap,
 } from 'lucide-react';
 import {
+  DrugClass,
   PaymentMethod,
   CartItem,
   UserRole,
@@ -22,6 +23,7 @@ import {
   MAX_DISCOUNT_PAISA,
   ROLE_MAX_DISCOUNT,
 } from '../types/pharmacy';
+import { getBackend } from '../api';
 import { allocateFefo, localIsoDate } from '../utils/fefo';
 import {
   BillingTemplate,
@@ -41,7 +43,7 @@ import { findProductByScan, normalizeScannedValue, useBarcodeScanner } from '../
 import { loadPosCatalog } from '../data/posCatalog';
 import { getRequiredSmallestUnits, type PosCatalogProduct } from '../data/posCatalogLogic';
 import { STOCK_CHANGED_EVENT } from '../utils/stockAlertsEvents';
-import { postSale, type PostSaleInput } from '../data/sales';
+import { loadPosCustomers, postSale, type PostSaleInput, type PrescriptionDetails } from '../data/sales';
 import { SaleReturnsPanel } from './returns/SaleReturnsPanel';
 
 interface POSBillingViewProps {
@@ -73,6 +75,9 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
   onOpenTemplatePreview,
 }) => {
   const [products, setProducts] = useState<PosCatalogProduct[]>([]);
+  const [posCustomers, setPosCustomers] = useState(customers);
+  const [posCustomerError, setPosCustomerError] = useState('');
+  const [prescriptions, setPrescriptions] = useState<Record<string, PrescriptionDetails>>({});
   const catalogToday = products[0]?.catalogToday ?? localIsoDate();
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState('');
@@ -139,6 +144,33 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
   // Modals
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [saleCompleteModal, setSaleCompleteModal] = useState<CompletedSale | null>(null);
+
+  useEffect(() => {
+    if (getBackend() !== 'api') {
+      setPosCustomers(customers);
+      setPosCustomerError('');
+      return;
+    }
+    let active = true;
+    setPosCustomers([]);
+    setSelectedCustomerId('');
+    void loadPosCustomers()
+      .then((loadedCustomers) => {
+        if (!active) return;
+        setPosCustomers(loadedCustomers);
+        setPosCustomerError('');
+        setSelectedCustomerId((currentId) =>
+          loadedCustomers.some((customer) => customer.id === currentId) ? currentId : '');
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setPosCustomerError(error instanceof Error ? error.message : 'Could not load POS customers.');
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [currentUserId, customers]);
 
   const categories = useMemo(() => ['ALL', ...Array.from(new Set(products.map((p) => p.category)))], [products]);
   const brands = useMemo(() => ['ALL', ...Array.from(new Set(products.map((p) => p.company)))], [products]);
@@ -492,7 +524,7 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
     }
 
     setSaleError('');
-    const customer = customers.find((c) => c.id === selectedCustomerId);
+    const customer = posCustomers.find((c) => c.id === selectedCustomerId);
     const splitCashPaisa = Math.round(splitCashPaymentPKR * 100);
     let payments: PostSaleInput['payments'];
     let tenderedPaisa: number;
@@ -531,10 +563,28 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
         setSaleError(`Choose a configured sale unit for ${item.productName}.`);
         return;
       }
+      const product = products.find((candidate) => candidate.id === item.productId);
+      const requiresPrescription = getBackend() === 'api'
+        && (product?.requiresPrescription === true
+          || product?.drugClass === DrugClass.CONTROLLED
+          || product?.drugClass === DrugClass.NARCOTIC);
+      const prescription = prescriptions[item.productId];
+      if (requiresPrescription && (!prescription
+        || !prescription.prescriber.trim() || !prescription.patient.trim() || !prescription.reference.trim())) {
+        setSaleError(`Enter prescriber, patient, and reference details for ${item.productName}.`);
+        return;
+      }
       saleItems.push({
         medicineId: item.productId,
         unitId: item.unitId,
         quantityInUnit: item.quantityInUnit,
+        ...(requiresPrescription && prescription ? {
+          prescription: {
+            prescriber: prescription.prescriber.trim(),
+            patient: prescription.patient.trim(),
+            reference: prescription.reference.trim(),
+          },
+        } : {}),
       });
     }
     const saleInput: PostSaleInput = {
@@ -562,10 +612,20 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
       setCart([]);
       setDiscount({ mode: 'percent', value: '' });
       setTenderedAmountPKR(0);
+      setPrescriptions({});
     }).catch((error: unknown) => {
       setSaleError(error instanceof Error ? error.message : 'Could not complete the sale.');
     }).finally(() => setIsPostingSale(false));
   };
+
+  const requiredPrescriptionProducts = Array.from(new Map(cart
+    .map((item) => products.find((product) => product.id === item.productId))
+    .filter((product): product is PosCatalogProduct => product !== undefined)
+    .filter((product) => getBackend() === 'api'
+      && (product.requiresPrescription === true
+        || product.drugClass === DrugClass.CONTROLLED
+        || product.drugClass === DrugClass.NARCOTIC))
+    .map((product) => [product.id, product])).values());
 
   return (
     <div className="space-y-4">
@@ -848,12 +908,13 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
                   className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-blue-600 bg-white font-medium text-slate-800"
                 >
                   <option value="">👤 Walk-in Customer</option>
-                  {customers.map((c) => (
+                  {posCustomers.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
                   ))}
                 </select>
+                {posCustomerError && <p role="status" className="mt-1 text-xs text-warning">{posCustomerError}</p>}
               </div>
 
               <input
@@ -1173,6 +1234,56 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
                 notice={discountNotice}
                 onChange={handleDiscountChange}
               />
+
+              {requiredPrescriptionProducts.length > 0 && (
+                <fieldset className="order-2 space-y-3 rounded-control border border-border bg-surface-muted p-3">
+                  <legend className="px-1 font-bold text-text">Prescription details required</legend>
+                  {requiredPrescriptionProducts.map((product) => {
+                    const details = prescriptions[product.id] ?? { prescriber: '', patient: '', reference: '' };
+                    return (
+                      <div key={product.id} className="space-y-2">
+                        <p className="font-semibold text-text">{product.brandName}</p>
+                        <label className="block text-muted">Prescriber
+                          <input
+                            value={details.prescriber}
+                            onChange={(event) => setPrescriptions((current) => ({
+                              ...current,
+                              [product.id]: { ...details, prescriber: event.target.value },
+                            }))}
+                            className="mt-1 w-full rounded-control border border-border bg-surface px-3 py-2 text-text"
+                            maxLength={160}
+                            aria-required="true"
+                          />
+                        </label>
+                        <label className="block text-muted">Patient
+                          <input
+                            value={details.patient}
+                            onChange={(event) => setPrescriptions((current) => ({
+                              ...current,
+                              [product.id]: { ...details, patient: event.target.value },
+                            }))}
+                            className="mt-1 w-full rounded-control border border-border bg-surface px-3 py-2 text-text"
+                            maxLength={160}
+                            aria-required="true"
+                          />
+                        </label>
+                        <label className="block text-muted">Prescription reference
+                          <input
+                            value={details.reference}
+                            onChange={(event) => setPrescriptions((current) => ({
+                              ...current,
+                              [product.id]: { ...details, reference: event.target.value },
+                            }))}
+                            className="mt-1 w-full rounded-control border border-border bg-surface px-3 py-2 text-text"
+                            maxLength={160}
+                            aria-required="true"
+                          />
+                        </label>
+                      </div>
+                    );
+                  })}
+                </fieldset>
+              )}
 
               {paymentMethod === 'CASH' && <div className="order-2">
                 <div className="flex justify-between font-bold text-slate-700 mb-1">

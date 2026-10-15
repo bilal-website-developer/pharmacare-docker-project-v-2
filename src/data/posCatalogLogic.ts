@@ -16,6 +16,7 @@ export interface PosCatalogBatch extends FefoBatch {
 
 export interface PosCatalogProduct {
   catalogToday?: string;
+  requiresPrescription?: boolean;
   id: string;
   code: string;
   barcode: string | null;

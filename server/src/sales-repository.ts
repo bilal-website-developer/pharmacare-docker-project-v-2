@@ -12,17 +12,24 @@ import type {
   SalesHistoryQuery,
   SalePaymentRecord,
 } from './sales-domain.js';
-import { normalizedCustomerName } from './sales-domain.js';
+import { normalizedCustomerName, roundSaleTotalPaisa } from './sales-domain.js';
 
 export interface SalesRepository {
   posCatalog(shopId: ObjectId, today: Date): Promise<{ today: string; items: Array<Record<string, unknown>> }>;
+  posCustomers(shopId: ObjectId): Promise<CustomerRecord[]>;
   listCustomers(shopId: ObjectId, options: CustomerListQuery): Promise<{ rows: CustomerRecord[]; total: number }>;
   customerAccountsSummary(shopId: ObjectId): Promise<{ customers: CustomerRecord[]; ledgerEntries: Record<string, unknown>[] }>;
   createCustomer(shopId: ObjectId, actorId: ObjectId, input: CustomerInput, audit: AuditRecord): Promise<CustomerRecord>;
   updateCustomer(shopId: ObjectId, id: ObjectId, actorId: ObjectId, input: CustomerUpdateInput, audit: AuditRecord): Promise<CustomerRecord | null>;
   deleteCustomer(shopId: ObjectId, id: ObjectId, actorId: ObjectId, audit: AuditRecord): Promise<boolean>;
   recordCustomerPayment(shopId: ObjectId, id: ObjectId, actor: UserRecord, input: CustomerPaymentInput, audit: AuditRecord): Promise<Record<string, unknown> | null>;
-  postSale(input: PostSaleInput, actor: UserRecord, audit: AuditRecord, today: Date): Promise<SaleRecord>;
+  postSale(
+    input: PostSaleInput,
+    actor: UserRecord,
+    audit: AuditRecord,
+    today: Date,
+    roundNet?: string,
+  ): Promise<SaleRecord>;
   listSales(shopId: ObjectId, options: SalesHistoryQuery, cashierId?: ObjectId): Promise<{ rows: SaleRecord[]; total: number }>;
 }
 
@@ -189,6 +196,13 @@ export class MongoSalesRepository implements SalesRepository {
       customers.countDocuments(filter),
     ]);
     return { rows, total };
+  }
+
+  async posCustomers(shopId: ObjectId): Promise<CustomerRecord[]> {
+    return this.database.collection<CustomerRecord>('customers')
+      .find({ shopId, deletedAt: null })
+      .sort({ name: 1, _id: 1 })
+      .toArray();
   }
 
   async customerAccountsSummary(shopId: ObjectId): Promise<{ customers: CustomerRecord[]; ledgerEntries: Record<string, unknown>[] }> {
@@ -378,7 +392,13 @@ export class MongoSalesRepository implements SalesRepository {
     return `${prefix}${asLong(counter.lastValue).toString().padStart(6, '0')}`;
   }
 
-  async postSale(input: PostSaleInput, actor: UserRecord, audit: AuditRecord, today: Date): Promise<SaleRecord> {
+  async postSale(
+    input: PostSaleInput,
+    actor: UserRecord,
+    audit: AuditRecord,
+    today: Date,
+    roundNet = 'none',
+  ): Promise<SaleRecord> {
     try {
       return await this.transact(async (session) => {
         const now = new Date();
@@ -436,7 +456,8 @@ export class MongoSalesRepository implements SalesRepository {
         ].reduce((lowest, amount) => amount < lowest ? amount : lowest);
         const requestedDiscount = BigInt(input.discountPaisa);
         if (requestedDiscount > maxDiscount) throw new Error('DISCOUNT_EXCEEDS_ROLE_LIMIT');
-        const total = subtotal - requestedDiscount;
+        const { totalPaisa: total, roundingPaisa } = roundSaleTotalPaisa(subtotal, requestedDiscount, roundNet);
+        if (total > 9_223_372_036_854_775_807n) throw new Error('SALE_TOTAL_LIMIT_EXCEEDED');
         if (total < 0n) throw new Error('INVALID_SALE_TOTAL');
 
         const payments = input.payments.map((payment) => BigInt(payment.amountPaisa));
@@ -559,6 +580,7 @@ export class MongoSalesRepository implements SalesRepository {
           soldAt: now,
           subtotalPaisa: longFromBigInt(subtotal),
           discountPaisa: longFromBigInt(requestedDiscount),
+          roundingPaisa: signedLongFromBigInt(roundingPaisa),
           totalPaisa: longFromBigInt(total),
           amountTenderedPaisa: longFromBigInt(tendered),
           changePaisa: longFromBigInt(

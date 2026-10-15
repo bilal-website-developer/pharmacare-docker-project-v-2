@@ -62,6 +62,29 @@ function customerDto(customer: CustomerRecord): Record<string, unknown> {
   };
 }
 
+function posCustomerDto(customer: CustomerRecord): Record<string, unknown> {
+  return {
+    id: customer._id.toHexString(),
+    name: customer.name,
+    phone: customer.phone,
+    address: '',
+    creditLimitPaisa: customer.creditLimitPaisa.toString(),
+    currentBalancePaisa: customer.currentBalancePaisa.toString(),
+    storeCreditPaisa: customer.storeCreditPaisa.toString(),
+  };
+}
+
+function shopRoundNet(shop: { memoSettings?: { roundNet?: string }; receiptSettings?: { template?: string } }): string {
+  const configuredTemplate = shop.receiptSettings?.template;
+  const template = ['simple', 'classic', 'professional', 'modern', 'pharmacy-memo'].includes(String(configuredTemplate))
+    ? configuredTemplate
+    : 'pharmacy-memo';
+  const roundNet = shop.memoSettings?.roundNet;
+  return template === 'pharmacy-memo' && ['none', '1', '5', '10'].includes(String(roundNet))
+    ? String(roundNet)
+    : 'none';
+}
+
 function saleDto(sale: SaleRecord): Record<string, unknown> {
   return {
     id: sale._id.toHexString(),
@@ -73,6 +96,7 @@ function saleDto(sale: SaleRecord): Record<string, unknown> {
     customerPhone: sale.customerPhone,
     subtotalPaisa: sale.subtotalPaisa.toString(),
     discountPaisa: sale.discountPaisa.toString(),
+    roundingPaisa: sale.roundingPaisa.toString(),
     totalPaisa: sale.totalPaisa.toString(),
     amountTenderedPaisa: sale.amountTenderedPaisa.toString(),
     changePaisa: sale.changePaisa.toString(),
@@ -121,6 +145,7 @@ function saleListDto(sale: SaleRecord): Record<string, unknown> {
     customerPhone: sale.customerPhone,
     subtotalPaisa: sale.subtotalPaisa.toString(),
     discountPaisa: sale.discountPaisa.toString(),
+    roundingPaisa: sale.roundingPaisa.toString(),
     totalPaisa: sale.totalPaisa.toString(),
     amountTenderedPaisa: sale.amountTenderedPaisa.toString(),
     changePaisa: sale.changePaisa.toString(),
@@ -204,6 +229,13 @@ export function registerSalesRoutes(
     ));
   });
 
+  app.get('/api/pos/customers', { preHandler: pos }, async (request, reply) => {
+    const user = caller(request, reply);
+    if (!user) return;
+    const customers = await repository.posCustomers(user.shopId);
+    return reply.send({ items: customers.map(posCustomerDto) });
+  });
+
   app.post('/api/sales', { preHandler: pos }, async (request, reply) => {
     const user = caller(request, reply);
     if (!user) return;
@@ -217,6 +249,7 @@ export function registerSalesRoutes(
         user,
         audit(user, 'sale.posted', 'sale'),
         timezoneToday(shop.timeZone ?? 'Asia/Karachi'),
+        shopRoundNet(shop),
       );
       return reply.code(201).send(saleDto(sale));
     } catch (error) {

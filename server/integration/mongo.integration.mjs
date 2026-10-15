@@ -251,6 +251,48 @@ test('Mongo sale transaction rolls back stock and records after an injected mid-
   });
 });
 
+test('Mongo sale calculates memo rounding from persisted shop settings', { skip: !enabled }, async () => {
+  await withFixture(async ({ shopId, actor, input, medicineId, unitId }) => {
+    const stockRepository = new MongoStockRepository(client, config.mongoDbName);
+    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'), shopToday());
+    await database.collection('medicineUnits').updateOne(
+      { _id: unitId, shopId },
+      { $set: { pricePaisa: Long.fromNumber(1234) } },
+    );
+    await database.collection('shops').updateOne(
+      { _id: shopId },
+      { $set: { memoSettings: { roundNet: '5' }, receiptSettings: { template: 'pharmacy-memo' } } },
+    );
+    const app = createApp(client, config);
+    try {
+      await app.ready();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/sales',
+        headers: {
+          authorization: `Bearer ${accessToken(actor, config)}`,
+          'idempotency-key': randomUUID(),
+        },
+        payload: {
+          ...saleInput(medicineId, unitId),
+          payments: [{ method: 'CASH', amountPaisa: '1000' }],
+          amountTenderedPaisa: '1000',
+        },
+      });
+      assert.equal(response.statusCode, 201, response.body);
+      assert.equal(response.json().subtotalPaisa, '1234');
+      assert.equal(response.json().roundingPaisa, '-234');
+      assert.equal(response.json().totalPaisa, '1000');
+      const saved = await database.collection('sales').findOne({ shopId });
+      assert.equal(saved.roundingPaisa.toString(), '-234');
+      assert.equal(saved.totalPaisa.toString(), '1000');
+      assert.doesNotMatch(response.body, /(cost|profit|margin)/i);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 test('Mongo credit sales and customer payments keep distinct unique ledger references', { skip: !enabled }, async () => {
   await withFixture(async ({ shopId, actor, input, medicineId, unitId }) => {
     const stockRepository = new MongoStockRepository(client, config.mongoDbName);

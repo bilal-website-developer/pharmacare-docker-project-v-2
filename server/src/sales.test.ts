@@ -152,6 +152,85 @@ test('sale FEFO-allocates batches and persists split payment methods as separate
   }
 });
 
+test('sale rounding is derived from server shop settings and client rounding values are rejected', async () => {
+  const context = await setup();
+  try {
+    context.shop.memoSettings = { roundNet: '5' };
+    context.shop.receiptSettings = { template: 'pharmacy-memo' };
+    const fixture = seedSaleStock(context.sales, context.shop._id, {}, [10], 1234);
+    const payload = salePayload(fixture.medicineId, fixture.unitId, 1, 1000);
+    const tampered = await context.app.inject({
+      method: 'POST',
+      url: '/api/sales',
+      headers: requestHeaders(context.cashier),
+      payload: { ...payload, roundingPaisa: '-234' },
+    });
+    assert.equal(tampered.statusCode, 400);
+
+    const response = await context.app.inject({
+      method: 'POST',
+      url: '/api/sales',
+      headers: requestHeaders(context.cashier),
+      payload,
+    });
+    assert.equal(response.statusCode, 201, response.body);
+    assert.equal(response.json<{ subtotalPaisa: string }>().subtotalPaisa, '1234');
+    assert.equal(response.json<{ roundingPaisa: string }>().roundingPaisa, '-234');
+    assert.equal(response.json<{ totalPaisa: string }>().totalPaisa, '1000');
+
+    const stalePayment = await context.app.inject({
+      method: 'POST',
+      url: '/api/sales',
+      headers: requestHeaders(context.cashier),
+      payload: salePayload(fixture.medicineId, fixture.unitId, 1, 1234),
+    });
+    assert.equal(stalePayment.statusCode, 400);
+    assert.equal(stalePayment.json<{ error: string }>().error, 'PAYMENTS_MUST_EQUAL_TOTAL');
+    assert.equal((await context.sales.listSales(context.shop._id, { page: 1, pageSize: 10 })).total, 1);
+
+    context.shop.receiptSettings = { template: 'classic' };
+    const classicSale = await context.app.inject({
+      method: 'POST',
+      url: '/api/sales',
+      headers: requestHeaders(context.cashier),
+      payload: salePayload(fixture.medicineId, fixture.unitId, 1, 1234),
+    });
+    assert.equal(classicSale.statusCode, 201, classicSale.body);
+    assert.equal(classicSale.json<{ roundingPaisa: string }>().roundingPaisa, '0');
+    assert.equal(classicSale.json<{ totalPaisa: string }>().totalPaisa, '1234');
+  } finally {
+    await close(context.app, context.client);
+  }
+});
+
+test('POS customer list is shop-scoped and omits private customer identifiers', async () => {
+  const context = await setup();
+  try {
+    context.cashier.permissions = ['pos'];
+    const own = context.sales.seedCustomer(context.shop._id, {
+      name: 'POS Customer',
+      cnic: 'sensitive-test-cnic',
+      address: 'Sensitive street address',
+    });
+    context.sales.seedCustomer(new ObjectId(), { name: 'Other Shop Customer' });
+    const response = await context.app.inject({
+      method: 'GET',
+      url: '/api/pos/customers',
+      headers: requestHeaders(context.cashier),
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    const items = response.json<{ items: Array<Record<string, unknown>> }>().items;
+    assert.equal(items.length, 1);
+    assert.equal(items[0]!.id, own._id.toHexString());
+    assert.deepEqual(Object.keys(items[0]!).sort(), [
+      'address', 'creditLimitPaisa', 'currentBalancePaisa', 'id', 'name', 'phone', 'storeCreditPaisa',
+    ].sort());
+    assert.doesNotMatch(JSON.stringify(items), /sensitive-test-cnic|Sensitive street address|cost|profit|margin/i);
+  } finally {
+    await close(context.app, context.client);
+  }
+});
+
 test('concurrent sales competing for the last unit allow exactly one sale', async () => {
   const context = await setup();
   try {

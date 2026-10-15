@@ -176,7 +176,10 @@ export async function loadPosCatalog(): Promise<PosCatalogProduct[]> {
     if (!isPosCatalogResponse(mapped)) {
       throw new Error('The POS catalog service returned an invalid response.');
     }
-    return toPosCatalogProducts(mapped, catalog.today);
+    return toPosCatalogProducts(mapped, catalog.today).map((product, index) => ({
+      ...product,
+      requiresPrescription: catalog.items[index]!.requiresPrescription,
+    }));
   }
 
   if (!supabase) {

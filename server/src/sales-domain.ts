@@ -139,6 +139,7 @@ export interface SaleRecord {
   soldAt: Date;
   subtotalPaisa: import('mongodb').Long;
   discountPaisa: import('mongodb').Long;
+  roundingPaisa: import('mongodb').Long;
   totalPaisa: import('mongodb').Long;
   amountTenderedPaisa: import('mongodb').Long;
   changePaisa: import('mongodb').Long;
@@ -148,6 +149,22 @@ export interface SaleRecord {
   voidedBy?: ObjectId;
   voidReason?: string;
   items: SaleItemRecord[];
+}
+
+export function roundSaleTotalPaisa(
+  subtotalPaisa: bigint,
+  discountPaisa: bigint,
+  roundNet: string,
+): { totalPaisa: bigint; roundingPaisa: bigint } {
+  const unroundedTotal = subtotalPaisa - discountPaisa;
+  const roundingUnit = roundNet === '1' ? 100n
+    : roundNet === '5' ? 500n
+      : roundNet === '10' ? 1000n
+        : 0n;
+  const totalPaisa = roundingUnit === 0n
+    ? unroundedTotal
+    : ((unroundedTotal + roundingUnit / 2n) / roundingUnit) * roundingUnit;
+  return { totalPaisa, roundingPaisa: totalPaisa - unroundedTotal };
 }
 
 export function normalizedCustomerName(name: string): string {

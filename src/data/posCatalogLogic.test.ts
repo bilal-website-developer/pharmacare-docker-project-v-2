@@ -45,7 +45,7 @@ function apiProduct() {
     category: 'Pain Relief',
     company: 'Example Pharma',
     drugClass: 'OTC',
-    requiresPrescription: false,
+    requiresPrescription: true,
     stockBaseUnits: '20',
     units: [{
       id: 'unit-1',
@@ -116,6 +116,7 @@ test('loads API catalog data and maps exact integer strings to the POS model', a
   assert.equal(loaded.units[0].pricePerUnitPaisa, 5000);
   assert.equal(loaded.batches[0].quantitySmallestUnit, 20);
   assert.equal(loaded.batches[0].productId, 'medicine-1');
+  assert.equal(loaded.requiresPrescription, true);
 });
 
 test('rejects API catalog data containing unexpected cost-bearing fields', async () => {

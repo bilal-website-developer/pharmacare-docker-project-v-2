@@ -11,7 +11,7 @@ import type {
   SaleRecord,
   SalesHistoryQuery,
 } from '../sales-domain.js';
-import { normalizedCustomerName } from '../sales-domain.js';
+import { normalizedCustomerName, roundSaleTotalPaisa } from '../sales-domain.js';
 import type { SalesRepository } from '../sales-repository.js';
 
 interface MemoryState {
@@ -204,6 +204,12 @@ export class MemorySalesRepository implements SalesRepository {
     return { rows: page(rows, options.page, options.pageSize), total: rows.length };
   }
 
+  async posCustomers(shopId: ObjectId): Promise<CustomerRecord[]> {
+    return this.state.customers
+      .filter((customer) => customer.shopId.equals(shopId) && customer.deletedAt === null)
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
   async customerAccountsSummary(shopId: ObjectId): Promise<{ customers: CustomerRecord[]; ledgerEntries: Record<string, unknown>[] }> {
     const entries = this.state.ledger.filter((entry) => (entry.shopId as ObjectId).equals(shopId))
       .sort((a, b) => (a.createdAt as Date).getTime() - (b.createdAt as Date).getTime());
@@ -335,7 +341,13 @@ export class MemorySalesRepository implements SalesRepository {
     return `${prefix}${String(number).padStart(6, '0')}`;
   }
 
-  async postSale(input: PostSaleInput, actor: UserRecord, audit: AuditRecord, today: Date): Promise<SaleRecord> {
+  async postSale(
+    input: PostSaleInput,
+    actor: UserRecord,
+    audit: AuditRecord,
+    today: Date,
+    roundNet = 'none',
+  ): Promise<SaleRecord> {
     return this.transaction(async () => {
       const customer = input.customerId
         ? this.state.customers.find((entry) =>
@@ -384,7 +396,7 @@ export class MemorySalesRepository implements SalesRepository {
         .reduce((min, value) => min < value ? min : value);
       const discount = BigInt(input.discountPaisa);
       if (discount > maxDiscount) throw new Error('DISCOUNT_EXCEEDS_ROLE_LIMIT');
-      const total = subtotal - discount;
+      const { totalPaisa: total, roundingPaisa } = roundSaleTotalPaisa(subtotal, discount, roundNet);
       const paymentTotal = input.payments.reduce((sum, payment) => sum + BigInt(payment.amountPaisa), 0n);
       if (paymentTotal !== total) throw new Error('PAYMENTS_MUST_EQUAL_TOTAL');
       const credit = input.payments.reduce((sum, payment) =>
@@ -476,7 +488,8 @@ export class MemorySalesRepository implements SalesRepository {
         cashierName: actor.fullName, customerId: customer?._id ?? null,
         customerName: customer?.name ?? (input.customerName.trim() || 'Walk-in Customer'),
         customerPhone: customer?.phone ?? '', soldAt: now,
-        subtotalPaisa: long(subtotal), discountPaisa: long(discount), totalPaisa: long(total),
+        subtotalPaisa: long(subtotal), discountPaisa: long(discount),
+        roundingPaisa: long(roundingPaisa), totalPaisa: long(total),
         amountTenderedPaisa: long(tendered),
         changePaisa: long(method === 'CASH' ? tendered - total : 0n),
         paymentMethod: method, status: 'COMPLETED', items,

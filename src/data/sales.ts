@@ -6,6 +6,7 @@ import {
   type CompletedSale,
   type Customer,
 } from '../types/pharmacy';
+import { apiRequest, getBackend } from '../api';
 import { getSupabaseErrorMessage } from '../utils/supabaseError';
 import { supabase } from '../utils/supabase';
 
@@ -14,10 +15,21 @@ export interface SalePaymentInput {
   amountPaisa: number;
 }
 
+export interface PrescriptionDetails {
+  prescriber: string;
+  patient: string;
+  reference: string;
+}
+
 export interface PostSaleInput {
   customerId: string | null;
   customerName: string;
-  items: Array<{ medicineId: string; unitId: string; quantityInUnit: number }>;
+  items: Array<{
+    medicineId: string;
+    unitId: string;
+    quantityInUnit: number;
+    prescription?: PrescriptionDetails;
+  }>;
   discountPaisa: number;
   roundingPaisa: number;
   tenderedPaisa: number;
@@ -60,6 +72,151 @@ export function isPositiveInteger(value: unknown): value is number {
 
 export function isNonNegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length && keys.every((key) => key in value);
+}
+
+function apiPaisaNumber(value: unknown, allowNegative = false): number | null {
+  if (typeof value !== 'string'
+    || !(allowNegative ? /^-?(0|[1-9]\d*)$/ : /^(0|[1-9]\d*)$/).test(value)) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
+function parsePosCustomer(value: unknown): Customer | null {
+  if (!isRecord(value)
+    || !hasExactKeys(value, [
+      'id', 'name', 'phone', 'address', 'creditLimitPaisa', 'currentBalancePaisa', 'storeCreditPaisa',
+    ])
+    || !isString(value.id) || !isString(value.name) || !isString(value.phone) || !isString(value.address)) {
+    return null;
+  }
+  const creditLimitPaisa = apiPaisaNumber(value.creditLimitPaisa);
+  const currentBalancePaisa = apiPaisaNumber(value.currentBalancePaisa);
+  const storeCreditPaisa = apiPaisaNumber(value.storeCreditPaisa);
+  if (creditLimitPaisa === null || currentBalancePaisa === null || storeCreditPaisa === null) return null;
+  return { id: value.id, name: value.name, phone: value.phone, address: value.address, creditLimitPaisa, currentBalancePaisa, storeCreditPaisa };
+}
+
+function parseSalePrescription(value: unknown): boolean {
+  return isRecord(value)
+    && hasExactKeys(value, ['prescriber', 'patient', 'reference'])
+    && isString(value.prescriber) && isString(value.patient) && isString(value.reference);
+}
+
+function parseApiSale(value: unknown): CompletedSale {
+  const saleKeys = [
+    'id', 'invoiceNumber', 'timestamp', 'cashierName', 'customerId', 'customerName', 'customerPhone',
+    'subtotalPaisa', 'discountPaisa', 'roundingPaisa', 'totalPaisa', 'amountTenderedPaisa',
+    'changePaisa', 'paymentMethod', 'status', 'items',
+  ];
+  if (!isRecord(value) || !hasExactKeys(value, saleKeys)
+    || !isString(value.id) || !isString(value.invoiceNumber) || !isString(value.timestamp)
+    || !isString(value.cashierName) || (value.customerId !== null && !isString(value.customerId))
+    || !isString(value.customerName) || !isString(value.customerPhone)
+    || value.status !== 'COMPLETED' || !Array.isArray(value.items)) {
+    throw new Error('The sales service returned an invalid response.');
+  }
+  const paymentMethod = value.paymentMethod === 'CASH' ? PaymentMethod.CASH
+    : value.paymentMethod === 'CARD' ? PaymentMethod.EASYPAISA
+      : value.paymentMethod === 'CREDIT' ? PaymentMethod.CREDIT
+        : value.paymentMethod === 'SPLIT' ? PaymentMethod.SPLIT
+          : null;
+  const subtotalPaisa = apiPaisaNumber(value.subtotalPaisa);
+  const discountPaisa = apiPaisaNumber(value.discountPaisa);
+  const roundingPaisa = apiPaisaNumber(value.roundingPaisa, true);
+  const totalPaisa = apiPaisaNumber(value.totalPaisa);
+  const amountTenderedPaisa = apiPaisaNumber(value.amountTenderedPaisa);
+  const changePaisa = apiPaisaNumber(value.changePaisa);
+  if (!paymentMethod || subtotalPaisa === null || discountPaisa === null || roundingPaisa === null
+    || totalPaisa === null || amountTenderedPaisa === null || changePaisa === null) {
+    throw new Error('The sales service returned an invalid response.');
+  }
+
+  const items: CartItem[] = value.items.map((rawItem) => {
+    if (!isRecord(rawItem)) throw new Error('The sales service returned an invalid response.');
+    const itemKeys = [
+      'id', 'medicineId', 'medicineCode', 'productName', 'genericName', 'drugClass', 'unitId', 'unitName',
+      'conversionFactor', 'quantityInUnit', 'quantityBaseUnits', 'pricePaisaPerUnit', 'lineDiscountPaisa',
+      'lineTotalPaisa', 'batchAllocations',
+    ];
+    const optionalPrescription = 'prescription' in rawItem;
+    if (!hasExactKeys(rawItem, optionalPrescription ? [...itemKeys, 'prescription'] : itemKeys)
+      || !isString(rawItem.id) || !isString(rawItem.medicineId) || !isString(rawItem.medicineCode)
+      || !isString(rawItem.productName)
+      || !isString(rawItem.genericName) || !isDrugClass(rawItem.drugClass)
+      || !isString(rawItem.unitId) || !isString(rawItem.unitName)
+      || !Number.isSafeInteger(rawItem.conversionFactor) || Number(rawItem.conversionFactor) <= 0
+      || !isPositiveInteger(rawItem.quantityInUnit)
+      || (optionalPrescription && !parseSalePrescription(rawItem.prescription))
+      || !Array.isArray(rawItem.batchAllocations) || rawItem.batchAllocations.length === 0) {
+      throw new Error('The sales service returned an invalid response.');
+    }
+    const quantitySmallestUnit = apiPaisaNumber(rawItem.quantityBaseUnits);
+    const mrpPaisaPerUnit = apiPaisaNumber(rawItem.pricePaisaPerUnit);
+    const lineDiscountPaisa = apiPaisaNumber(rawItem.lineDiscountPaisa);
+    const lineTotalPaisa = apiPaisaNumber(rawItem.lineTotalPaisa);
+    if (quantitySmallestUnit === null || quantitySmallestUnit <= 0
+      || mrpPaisaPerUnit === null || lineDiscountPaisa === null || lineTotalPaisa === null) {
+      throw new Error('The sales service returned an invalid response.');
+    }
+    const batchAllocations = rawItem.batchAllocations.map((rawAllocation) => {
+      if (!isRecord(rawAllocation)
+        || !hasExactKeys(rawAllocation, ['batchId', 'batchNumber', 'expiryDate', 'quantityBaseUnits'])
+        || !isString(rawAllocation.batchId) || !isString(rawAllocation.batchNumber)
+        || !isString(rawAllocation.expiryDate)) {
+        throw new Error('The sales service returned an invalid response.');
+      }
+      const quantity = apiPaisaNumber(rawAllocation.quantityBaseUnits);
+      if (quantity === null || quantity <= 0) throw new Error('The sales service returned an invalid response.');
+      return {
+        batchId: rawAllocation.batchId,
+        batchNumber: rawAllocation.batchNumber,
+        expiryDate: rawAllocation.expiryDate,
+        quantitySmallestUnit: quantity,
+      };
+    });
+    const firstAllocation = batchAllocations[0];
+    if (!firstAllocation) throw new Error('The sales service returned an invalid response.');
+    return {
+      productId: rawItem.medicineId,
+      productName: rawItem.productName,
+      genericName: rawItem.genericName,
+      batchId: firstAllocation.batchId,
+      batchNumber: firstAllocation.batchNumber,
+      expiryDate: firstAllocation.expiryDate,
+      drugClass: rawItem.drugClass,
+      unitId: rawItem.unitId,
+      unitName: rawItem.unitName,
+      conversionFactor: Number(rawItem.conversionFactor),
+      quantityInUnit: rawItem.quantityInUnit,
+      mrpPaisaPerUnit,
+      costPaisaPerUnit: null,
+      discountPercent: 0,
+      lineTotalPaisa,
+      batchAllocations,
+    };
+  });
+
+  return {
+    id: value.id,
+    invoiceNumber: value.invoiceNumber,
+    timestamp: value.timestamp,
+    cashierName: value.cashierName,
+    ...(value.customerId ? { customerId: value.customerId } : {}),
+    customerName: value.customerName,
+    customerPhone: value.customerPhone,
+    items,
+    subtotalPaisa,
+    discountPaisa,
+    totalPaisa,
+    roundingPaisa,
+    paymentMethod,
+    amountTenderedPaisa,
+    changePaisa,
+  };
 }
 
 function isDrugClass(value: unknown): value is DrugClass {
@@ -144,7 +301,7 @@ function isCompletedSale(value: unknown): value is CompletedSale {
     && isNonNegativeInteger(value.subtotalPaisa)
     && isNonNegativeInteger(value.discountPaisa)
     && isNonNegativeInteger(value.totalPaisa)
-    && isNonNegativeInteger(value.roundingPaisa)
+    && (value.roundingPaisa === undefined || Number.isSafeInteger(value.roundingPaisa))
     && isPaymentMethod(value.paymentMethod)
     && isNonNegativeInteger(value.amountTenderedPaisa)
     && isNonNegativeInteger(value.changePaisa);
@@ -231,6 +388,17 @@ export async function callSupabaseRpc<T>(
 }
 
 export async function loadPosCustomers(): Promise<Customer[]> {
+  if (getBackend() === 'api') {
+    const response = await apiRequest<unknown>('/api/pos/customers');
+    if (!isRecord(response) || !hasExactKeys(response, ['items']) || !Array.isArray(response.items)) {
+      throw new Error('The POS customer service returned an invalid response.');
+    }
+    const customers = response.items.map(parsePosCustomer);
+    if (customers.some((customer) => customer === null)) {
+      throw new Error('The POS customer service returned an invalid response.');
+    }
+    return customers.filter((customer): customer is Customer => customer !== null);
+  }
   return callSupabaseRpc('pos_customers', undefined, 'Could not load POS customers.', (value): value is Customer[] =>
     Array.isArray(value) && value.every(isCustomer));
 }
@@ -278,6 +446,31 @@ export async function recordCustomerPayment(
 }
 
 export async function postSale(input: PostSaleInput): Promise<CompletedSale> {
+  if (getBackend() === 'api') {
+    const method = (paymentMethod: PaymentMethod) => paymentMethod === PaymentMethod.CASH
+      ? 'CASH'
+      : paymentMethod === PaymentMethod.CREDIT ? 'CREDIT' : 'CARD';
+    const response = await apiRequest<unknown>('/api/sales', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...(input.customerId ? { customerId: input.customerId } : {}),
+        customerName: input.customerName,
+        items: input.items.map((item) => ({
+          medicineId: item.medicineId,
+          unitId: item.unitId,
+          quantityInUnit: item.quantityInUnit,
+          ...(item.prescription ? { prescription: item.prescription } : {}),
+        })),
+        discountPaisa: String(input.discountPaisa),
+        payments: input.payments.map((payment) => ({
+          method: method(payment.paymentMethod),
+          amountPaisa: String(payment.amountPaisa),
+        })),
+        amountTenderedPaisa: String(input.tenderedPaisa),
+      }),
+    });
+    return parseApiSale(response);
+  }
   const raw = await callSupabaseRpc('post_sale', {
     p_customer_id: input.customerId,
     p_customer_name: input.customerName,

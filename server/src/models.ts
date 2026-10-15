@@ -7,6 +7,8 @@ export interface ShopRecord {
   name: string;
   status: 'ACTIVE' | 'SUSPENDED';
   timeZone?: string;
+  memoSettings?: { roundNet?: string };
+  receiptSettings?: { template?: string };
 }
 
 export interface UserRecord {
