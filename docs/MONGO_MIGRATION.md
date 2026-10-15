@@ -8,11 +8,11 @@ This file tracks migration phase deliverables and verification. It does not auth
 |---:|---|---|---|
 | 0 | Read-only source inventory | Complete, committed as `eb9dd0c` | [`MONGO_MIGRATION_INVENTORY.md`](./MONGO_MIGRATION_INVENTORY.md); source-only. Live Supabase state remains unverified. |
 | 1 | Mongo collection/API design and threat model | Drafted; awaiting owner approval | [`MONGO_DESIGN.md`](./MONGO_DESIGN.md), [`MONGO_THREAT_MODEL.md`](./MONGO_THREAT_MODEL.md). No code or database changes. |
-| 2 | Docker/API foundation | Implemented locally; awaiting owner-run Compose verification | At Phase 2 completion this provided the health-only Fastify skeleton. Owner-run Compose verification is still pending. |
+| 2 | Docker/API foundation | Local Compose startup and health verified | Mongo reports healthy, `mongo-init` exits 0, API reports healthy, web reports healthy, and the proxied health endpoint returns HTTP 200. This is local development verification, not production deployment verification. |
 | 3 | Authentication and Manage Users API | Implemented locally; awaiting owner-run Docker/runtime verification | Auth/session routes, authorization middleware, policy-aligned user routes, bootstrap CLI, and tests are in `server/`. This does not cut over the frontend or implement business modules. |
 | 4 | Catalog, product, and supplier API | Implemented locally; tests/build pass | Mongo/Docker runtime and live route verification are not performed. Route tests use in-memory repositories. |
 | 5 | Purchases and stock API | Implemented locally; source tests pass, owner runtime proof pending | Purchase posting/void, stock queries, adjustments, write-off, alert summary, and lazy expiry status refresh are in `server/`; Mongo transaction/runtime behavior is not verified. |
-| 5b | Mongo replica-set verification and write idempotency | Implemented locally; real-Mongo verification blocked | The prior integration attempt could not connect because Compose Mongo was unhealthy with root-user authentication failure. Owner selected per-shop IANA timezones, defaulting to `Asia/Karachi`. |
+| 5b | Mongo replica-set verification and write idempotency | Implemented locally; integration suite pending current run | An earlier local Compose attempt failed; the current initializer and health checks have now succeeded. Full replica-set behavioral verification is recorded separately below. Owner selected per-shop IANA timezones, defaulting to `Asia/Karachi`. |
 | 6 | POS sales and customer APIs | Implemented locally; Mongo runtime verification pending | Transactional sale/FEFO, discounts, payments, customers/khata, prescription capture, history, and local tests are implemented. Replica-set sale tests are present but were skipped because Mongo environment variables/runtime were unavailable. |
 | 6b | Real Mongo verification and timezone consistency | Implemented locally; real-Mongo verification awaits owner-run Compose | Added a Compose test runner for all seven replica-set tests and propagated shop-local “today” through stock, expiry, alert, purchase, adjustment, write-off, and sales logic. Run the documented Docker test steps to verify real Mongo behavior. |
 | 7+ | Remaining business API implementation | Not started | Preserve the Phase 2 Docker verification gate; implement transactions for every multi-document business write. |
@@ -22,6 +22,18 @@ This file tracks migration phase deliverables and verification. It does not auth
 ## Autopilot step 0 — housekeeping
 
 **Status: VERIFIED (local checks only).** `npm run lint` and `npm run build` passed. `npm run test:api-client` passed 4/4. `npm test` passed 184 tests, failed 0, skipped 7 (all real-Mongo integration tests; not Mongo runtime verification). The Vite build emitted existing `__dirname` and large-chunk warnings. Manual UI tests and live Mongo/Docker verification remain outstanding.
+
+## Autopilot step 1 — Mongo initialization and local Compose health
+
+**Status: VERIFIED (local development stack only).** Root cause: Mongo users are created in the application database, but the application client's connection URI incorrectly specified `authSource=admin`. The initializer now authenticates that client against its application database; root initialization continues to authenticate against `admin`.
+
+- `docker compose build mongo-init` completed successfully.
+- `npm --prefix server run lint` and `npm --prefix server run build` passed. `npm --prefix server test` reported 65 tests: 58 passed, 0 failed, 7 skipped (the real-Mongo integration tests are exercised in step 2).
+- `docker compose up --no-deps --force-recreate mongo-init` logged `replica_set_and_app_user_ready` and `application_indexes_ready`, then exited with code 0.
+- `docker compose up --detach --build api web` completed. `docker compose ps -a` showed Mongo healthy, mongo-init Exited (0), API healthy, and web healthy.
+- `curl.exe --silent --show-error --include http://localhost:8080/api/health` returned HTTP 200 and `{"status":"ok","database":"ok"}`.
+- The initial safe diagnostic captured the failing `connecting to Mongo as application user` step with Mongo code 18 / `AuthenticationFailed` and a generic errmsg; no URI or environment values were logged.
+- No volumes were deleted or reset. Business transaction behavior still depends on the real-Mongo integration tests in step 2.
 
 ## Phase 1 verification and open items
 

@@ -51,7 +51,7 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - Mixed persistence on the legacy frontend: POS/catalog, sales, customer/ledger, and sales-history paths use Supabase RPCs; Dashboard stock/expiry KPIs still use `INITIAL_PRODUCTS`, and Cash Book transactions/expenses remain React in-memory state. The migration branch adds Mongo-backed auth/users, catalog, purchase, stock, sale, and customer APIs; React screens have not been cut over. `medicineUnits` is a separate shop-scoped API collection (not the embedded-unit proposal) for independent CRUD and barcode uniqueness. Business transactions are source-implemented but not Mongo-runtime verified.
 - Other storage: unknown; no general file/object-storage workflow is established by the checked-in frontend docs.
 - Shared production data behavior depends on Supabase deployment and the live schema, which may differ from checked-in migrations.
-- The local Docker stack contains authenticated MongoDB on a private network and a Fastify API with health, auth, Manage Users, catalog, purchase, stock, and sales routes. Container networking and MongoDB transaction/runtime behavior remain unverified. The frontend still uses its existing Supabase code.
+- The local Docker stack contains authenticated MongoDB on a private network and a Fastify API with health, auth, Manage Users, catalog, purchase, stock, and sales routes. Local Compose startup, Mongo initialization/index creation, service health checks, and `/api/health` proxy have passed; business transaction behavior still requires the real-Mongo integration suite. Legacy Supabase paths remain available.
 
 ## Roles and permissions
 
@@ -150,6 +150,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 ## Changelog
 
 - 2026-10-15 — Phase 8 batch 1 wires auth/session and Stock Alerts through the API client behind `VITE_BACKEND`; API client tests are registered in the full test chain. Local Fastify defaults to port 3001 for the Vite proxy; Compose explicitly uses private port 3000. Lint/build pass; focused API client tests 4/4; full suite 184 pass, 0 fail, 7 Mongo integration skips. Manual UI and real-Mongo checks remain pending.
+- 2026-10-15 — Fixed Mongo app-user authentication in `mongo-init`: the app user is scoped to the application database, so its URI now uses that database as `authSource` (root user remains on `admin`). Compose initialized indexes and exited mongo-init 0; Mongo/API/web health and proxied `/api/health` HTTP 200 passed without resetting volumes.
 - 2026-10-15 — Phase 6b adds a Compose test runner and documented `.env`-backed command for seven real-Mongo integration tests, and aligns stock/sale expiry calculations to shop-local calendar days. Karachi midnight boundary and local checks passed (187 tests: 180 passed, 0 failed, 7 Mongo integration tests skipped); real Mongo execution awaits proof.
 - 2026-10-14 — Phases 5b/6 implemented Mongo idempotency, transactional sales, FEFO, role discount caps, split tender, customer credit, prescription capture, and sales history. Local tests/build passed; Mongo integration/runtime verification remained blocked.
 - 2026-10-14 — Implemented Phase 4 catalog/supplier APIs, EAN-13 registry, product CSV import/export, trash/restore, and role-based cost DTO filtering; updated design/tracker for separate `medicineUnits`. Root lint, full tests, and build pass locally; Mongo/Docker runtime and frontend cut-over remain unverified/not performed.
@@ -181,15 +182,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-15T09:05:06.582Z
+Generated at (UTC): 2026-10-15T09:13:47.189Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: API client, session and stock alerts (Phase 8 batch 1)
 - feat: align shop timezone expiry handling
 - feat: implement POS sales and customer APIs
 - docs: record expiry timezone decision
 - feat: add Mongo write idempotency checks
-- feat: implement Mongo stock and purchasing API
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`

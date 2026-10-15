@@ -1,5 +1,8 @@
-import { MongoClient, type Db, type IndexDescription } from 'mongodb';
+import { MongoClient, MongoServerError, type Db, type IndexDescription } from 'mongodb';
 import { z } from 'zod';
+
+let currentStep = 'starting Mongo initialization';
+let failedStep: string | undefined;
 
 const initSchema = z.object({
   MONGO_HOST: z.string().min(1),
@@ -37,19 +40,56 @@ function makeUri(
   const host = process.env.MONGO_HOST;
   const port = process.env.MONGO_PORT;
   const direct = directConnection ? '&directConnection=true' : '&replicaSet=rs0';
-  return `mongodb://${encodeCredential(username)}:${encodeCredential(password)}@${host}:${port}/${database}?authSource=admin${direct}`;
+  const authSource = directConnection ? 'admin' : database;
+  return `mongodb://${encodeCredential(username)}:${encodeCredential(password)}@${host}:${port}/${database}?authSource=${authSource}${direct}`;
 }
 
 function log(event: string): void {
   process.stdout.write(`${JSON.stringify({ event })}\n`);
 }
 
+async function runStep<T>(step: string, action: () => Promise<T>): Promise<T> {
+  currentStep = step;
+  try {
+    return await action();
+  } catch (error) {
+    failedStep = step;
+    throw error;
+  }
+}
+
+function redactSensitiveValues(value: string): string {
+  let redacted = value.replace(/mongodb(?:\+srv)?:\/\/[^\s"'<>]+/gi, '[REDACTED_MONGODB_URI]');
+  const environmentVariableNames = [
+    'MONGO_HOST',
+    'MONGO_PORT',
+    'MONGO_APP_DB',
+    'MONGO_APP_USERNAME',
+    'MONGO_APP_PASSWORD',
+    'MONGO_ROOT_USERNAME',
+    'MONGO_ROOT_PASSWORD',
+  ];
+
+  for (const name of environmentVariableNames) {
+    const environmentValue = process.env[name];
+    if (environmentValue) {
+      redacted = redacted.split(environmentValue).join('[REDACTED]');
+      redacted = redacted.split(encodeCredential(environmentValue)).join('[REDACTED]');
+    }
+  }
+
+  return redacted;
+}
+
 async function waitForPrimary(client: MongoClient, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const hello = await client.db('admin').command({ hello: 1 });
+      const hello = await runStep('checking replica set primary status', () =>
+        client.db('admin').command({ hello: 1 }),
+      );
       if (hello.isWritablePrimary === true) {
+        failedStep = undefined;
         return;
       }
     } catch {
@@ -62,18 +102,22 @@ async function waitForPrimary(client: MongoClient, timeoutMs: number): Promise<v
 
 async function ensureReplicaSet(client: MongoClient, hostname: string): Promise<void> {
   const admin = client.db('admin');
-  const hello = await admin.command({ hello: 1 });
+  const hello = await runStep('checking replica set configuration', () =>
+    admin.command({ hello: 1 }),
+  );
   if (hello.setName === 'rs0' && hello.isWritablePrimary === true) {
     return;
   }
 
   try {
-    await admin.command({
-      replSetInitiate: {
-        _id: 'rs0',
-        members: [{ _id: 0, host: `${hostname}:${process.env.MONGO_PORT}` }],
-      },
-    });
+    await runStep('initiating replica set', () =>
+      admin.command({
+        replSetInitiate: {
+          _id: 'rs0',
+          members: [{ _id: 0, host: `${hostname}:${process.env.MONGO_PORT}` }],
+        },
+      }),
+    );
   } catch (error) {
     if (
       typeof error !== 'object' ||
@@ -83,6 +127,7 @@ async function ensureReplicaSet(client: MongoClient, hostname: string): Promise<
     ) {
       throw error;
     }
+    failedStep = undefined;
   }
   await waitForPrimary(client, 60_000);
 }
@@ -94,31 +139,43 @@ async function ensureAppUser(
   password: string,
 ): Promise<void> {
   const database = adminClient.db(databaseName);
-  const existing = await database.command({ usersInfo: username });
+  const existing = await runStep('checking application database user', () =>
+    database.command({ usersInfo: username }),
+  );
   if (Array.isArray(existing.users) && existing.users.length > 0) {
-    await database.command({
-      updateUser: username,
-      pwd: password,
-      roles: [{ role: 'readWrite', db: databaseName }],
-    });
+    await runStep('updating application database user', () =>
+      database.command({
+        updateUser: username,
+        pwd: password,
+        roles: [{ role: 'readWrite', db: databaseName }],
+      }),
+    );
     return;
   }
-  await database.command({
-    createUser: username,
-    pwd: password,
-    roles: [{ role: 'readWrite', db: databaseName }],
-  });
+  await runStep('creating application database user', () =>
+    database.command({
+      createUser: username,
+      pwd: password,
+      roles: [{ role: 'readWrite', db: databaseName }],
+    }),
+  );
 }
 
 async function ensureIndexes(database: Db): Promise<void> {
-  const idempotencyCollectionExists = await database
-    .listCollections({ name: 'idempotencyRecords' }, { nameOnly: true })
-    .hasNext();
+  const idempotencyCollectionExists = await runStep(
+    'checking legacy idempotency index',
+    () => database.listCollections({ name: 'idempotencyRecords' }, { nameOnly: true }).hasNext(),
+  );
   if (idempotencyCollectionExists) {
     const idempotencyCollection = database.collection('idempotencyRecords');
-    const existingIndexes = await idempotencyCollection.listIndexes().toArray();
+    const existingIndexes = await runStep(
+      'listing indexes on collection idempotencyRecords',
+      () => idempotencyCollection.listIndexes().toArray(),
+    );
     if (existingIndexes.some((index) => index.name === 'shop_idempotency_unique')) {
-      await idempotencyCollection.dropIndex('shop_idempotency_unique');
+      await runStep('dropping legacy index on collection idempotencyRecords', () =>
+        idempotencyCollection.dropIndex('shop_idempotency_unique'),
+      );
     }
   }
 
@@ -263,11 +320,14 @@ async function ensureIndexes(database: Db): Promise<void> {
   };
 
   for (const [collectionName, descriptions] of Object.entries(indexes)) {
-    await database.collection(collectionName).createIndexes(descriptions);
+    await runStep(`creating indexes on collection ${collectionName}`, () =>
+      database.collection(collectionName).createIndexes(descriptions),
+    );
   }
 }
 
 async function main(): Promise<void> {
+  currentStep = 'validating Mongo initialization configuration';
   const parsed = initSchema.safeParse(process.env);
   if (!parsed.success) {
     const fields = parsed.error.issues.map((issue) => issue.path.join('.')).join(', ');
@@ -286,7 +346,7 @@ async function main(): Promise<void> {
   });
 
   try {
-    await adminClient.connect();
+    await runStep('connecting to Mongo as root administrator', () => adminClient.connect());
     await ensureReplicaSet(adminClient, config.MONGO_HOST);
     await ensureAppUser(
       adminClient,
@@ -296,7 +356,7 @@ async function main(): Promise<void> {
     );
     log('replica_set_and_app_user_ready');
   } finally {
-    await adminClient.close();
+    await runStep('closing root administrator connection', () => adminClient.close());
   }
 
   const appUri = makeUri(
@@ -310,11 +370,11 @@ async function main(): Promise<void> {
     serverSelectionTimeoutMS: 10_000,
   });
   try {
-    await appClient.connect();
+    await runStep('connecting to Mongo as application user', () => appClient.connect());
     await ensureIndexes(appClient.db(config.MONGO_APP_DB));
     log('application_indexes_ready');
   } finally {
-    await appClient.close();
+    await runStep('closing application user connection', () => appClient.close());
   }
 }
 
@@ -322,6 +382,21 @@ try {
   await main();
 } catch (error) {
   const reason = error instanceof Error ? error.name : 'unknown_error';
-  process.stderr.write(`${JSON.stringify({ event: 'mongo_init_failed', reason })}\n`);
+  const mongoErrorDetails =
+    error instanceof MongoServerError
+      ? {
+          code: error.code,
+          codeName: error.codeName,
+          errmsg: redactSensitiveValues(error.errmsg ?? error.message),
+        }
+      : {};
+  process.stderr.write(
+    `${JSON.stringify({
+      event: 'mongo_init_failed',
+      step: failedStep ?? currentStep,
+      reason,
+      ...mongoErrorDetails,
+    })}\n`,
+  );
   process.exitCode = 1;
 }
