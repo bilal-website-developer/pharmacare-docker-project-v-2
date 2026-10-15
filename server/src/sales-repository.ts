@@ -15,7 +15,7 @@ import type {
 import { normalizedCustomerName } from './sales-domain.js';
 
 export interface SalesRepository {
-  posCatalog(shopId: ObjectId, today: Date): Promise<{ items: Array<Record<string, unknown>> }>;
+  posCatalog(shopId: ObjectId, today: Date): Promise<{ today: string; items: Array<Record<string, unknown>> }>;
   listCustomers(shopId: ObjectId, options: CustomerListQuery): Promise<{ rows: CustomerRecord[]; total: number }>;
   customerAccountsSummary(shopId: ObjectId): Promise<{ customers: CustomerRecord[]; ledgerEntries: Record<string, unknown>[] }>;
   createCustomer(shopId: ObjectId, actorId: ObjectId, input: CustomerInput, audit: AuditRecord): Promise<CustomerRecord>;
@@ -99,28 +99,24 @@ export class MongoSalesRepository implements SalesRepository {
     }
   }
 
-  async posCatalog(shopId: ObjectId, today: Date): Promise<{ items: Array<Record<string, unknown>> }> {
+  async posCatalog(shopId: ObjectId, today: Date): Promise<{ today: string; items: Array<Record<string, unknown>> }> {
+    const todayText = today.toISOString().slice(0, 10);
     const medicines = await this.database.collection('medicines').find({
       shopId, isActive: true, deletedAt: null,
     }).sort({ name: 1, _id: 1 }).toArray();
-    if (medicines.length === 0) return { items: [] };
+    if (medicines.length === 0) return { today: todayText, items: [] };
     const ids = medicines.map((medicine) => medicine._id as ObjectId);
-    const [units, batchTotals] = await Promise.all([
+    const [units, batches] = await Promise.all([
       this.database.collection('medicineUnits').find({
         shopId, medicineId: { $in: ids }, deletedAt: null,
       }).sort({ isDefaultSaleUnit: -1, name: 1 }).toArray(),
-      this.database.collection('stockBatches').aggregate([
-        {
-          $match: {
-            shopId,
-            medicineId: { $in: ids },
-            quantityRemainingBaseUnits: { $gt: Long.ZERO },
-            expiryDate: { $gte: today },
-            status: { $in: ['ACTIVE', 'NEAR_EXPIRY'] },
-          },
-        },
-        { $group: { _id: '$medicineId', quantity: { $sum: '$quantityRemainingBaseUnits' } } },
-      ]).toArray(),
+      this.database.collection('stockBatches').find({
+        shopId,
+        medicineId: { $in: ids },
+        quantityRemainingBaseUnits: { $gt: Long.ZERO },
+        expiryDate: { $gte: today },
+        status: { $in: ['ACTIVE', 'NEAR_EXPIRY'] },
+      }).sort({ medicineId: 1, expiryDate: 1, receivedDate: 1, _id: 1 }).toArray(),
     ]);
     const unitsByMedicine = new Map<string, Array<Record<string, unknown>>>();
     for (const unit of units) {
@@ -136,23 +132,45 @@ export class MongoSalesRepository implements SalesRepository {
       });
       unitsByMedicine.set(medicineId, values);
     }
-    const stockByMedicine = new Map(batchTotals.map((row) => [
-      (row._id as ObjectId).toHexString(),
-      asLong(row.quantity).toString(),
-    ]));
+    const batchesByMedicine = new Map<string, Array<Record<string, unknown>>>();
+    const stockByMedicine = new Map<string, bigint>();
+    for (const batch of batches) {
+      const medicineId = (batch.medicineId as ObjectId).toHexString();
+      const values = batchesByMedicine.get(medicineId) ?? [];
+      const quantity = asLong(batch.quantityRemainingBaseUnits);
+      values.push({
+        id: (batch._id as ObjectId).toHexString(),
+        batchNumber: String(batch.batchNumber),
+        expiryDate: (batch.expiryDate as Date).toISOString().slice(0, 10),
+        receivedDate: (batch.receivedDate as Date).toISOString().slice(0, 10),
+        quantityBaseUnits: quantity.toString(),
+        status: String(batch.status),
+      });
+      batchesByMedicine.set(medicineId, values);
+      stockByMedicine.set(medicineId, (stockByMedicine.get(medicineId) ?? 0n) + BigInt(quantity.toString()));
+    }
     return {
-      items: medicines.map((medicine) => ({
-        id: (medicine._id as ObjectId).toHexString(),
-        code: String(medicine.code),
-        barcode: typeof medicine.barcode === 'string' ? medicine.barcode : null,
-        name: String(medicine.name),
-        genericName: String(medicine.genericName ?? ''),
-        strength: String(medicine.strength ?? ''),
-        drugClass: String(medicine.drugClass ?? 'OTC'),
-        requiresPrescription: medicine.requiresPrescription === true,
-        stockBaseUnits: stockByMedicine.get((medicine._id as ObjectId).toHexString()) ?? '0',
-        units: unitsByMedicine.get((medicine._id as ObjectId).toHexString()) ?? [],
-      })),
+      today: todayText,
+      items: medicines.flatMap((medicine) => {
+        const medicineId = (medicine._id as ObjectId).toHexString();
+        const sellableBatches = batchesByMedicine.get(medicineId) ?? [];
+        if (sellableBatches.length === 0) return [];
+        return [{
+          id: medicineId,
+          code: String(medicine.code),
+          barcode: typeof medicine.barcode === 'string' ? medicine.barcode : null,
+          name: String(medicine.name),
+          genericName: String(medicine.genericName ?? ''),
+          strength: String(medicine.strength ?? ''),
+          category: String(medicine.categoryName ?? ''),
+          company: String(medicine.brandName ?? ''),
+          drugClass: String(medicine.drugClass ?? 'OTC'),
+          requiresPrescription: medicine.requiresPrescription === true,
+          stockBaseUnits: (stockByMedicine.get(medicineId) ?? 0n).toString(),
+          units: unitsByMedicine.get(medicineId) ?? [],
+          batches: sellableBatches,
+        }];
+      }),
     };
   }
 

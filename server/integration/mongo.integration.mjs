@@ -587,7 +587,23 @@ test('Mongo returns enforce sold quantities, prevent double processing, and reco
         method: 'GET', url: '/api/pos/catalog', headers: cashierHeaders,
       });
       assert.equal(cashierCatalog.statusCode, 200, cashierCatalog.body);
-      assert.doesNotMatch(JSON.stringify(cashierCatalog.json()), /(cost|profit|margin)/i);
+      const catalogBody = cashierCatalog.json();
+      assert.doesNotMatch(JSON.stringify(catalogBody), /(cost|profit|margin)/i);
+      assert.deepEqual(Object.keys(catalogBody).sort(), ['items', 'today']);
+      assert.equal(catalogBody.today, shopToday().toISOString().slice(0, 10));
+      assert.equal(catalogBody.items.length, 1);
+      const catalogProduct = catalogBody.items[0];
+      assert.deepEqual(Object.keys(catalogProduct).sort(), [
+        'barcode', 'batches', 'category', 'code', 'company', 'drugClass', 'genericName',
+        'id', 'name', 'requiresPrescription', 'stockBaseUnits', 'strength', 'units',
+      ].sort());
+      assert.equal(catalogProduct.units[0].pricePaisa, '150');
+      assert.equal(catalogProduct.batches.length, 1);
+      assert.deepEqual(Object.keys(catalogProduct.batches[0]).sort(), [
+        'batchNumber', 'expiryDate', 'id', 'quantityBaseUnits', 'receivedDate', 'status',
+      ].sort());
+      assert.equal(typeof catalogProduct.batches[0].quantityBaseUnits, 'string');
+      assert.ok(BigInt(catalogProduct.batches[0].quantityBaseUnits) > 0n);
       const cashierReturnQueue = await app.inject({
         method: 'GET', url: '/api/returns/pending', headers: cashierHeaders,
       });

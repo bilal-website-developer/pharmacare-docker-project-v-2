@@ -1,5 +1,6 @@
 import { BatchStatus, DrugClass } from '../types/pharmacy';
 import type { FefoBatch } from '../utils/fefo';
+import { localIsoDate } from '../utils/fefo';
 
 export interface PosCatalogUnit {
   id: string;
@@ -14,6 +15,7 @@ export interface PosCatalogBatch extends FefoBatch {
 }
 
 export interface PosCatalogProduct {
+  catalogToday?: string;
   id: string;
   code: string;
   barcode: string | null;
@@ -165,9 +167,11 @@ export function getRequiredSmallestUnits(quantity: number, conversionFactor: num
 
 export function toPosCatalogProducts(
   rows: readonly RawPosCatalogProduct[],
+  catalogToday = localIsoDate(),
 ): PosCatalogProduct[] {
   return rows.map((product) => ({
     ...product,
+    catalogToday,
     batches: product.batches.map((batch) => ({
       ...batch,
       productId: product.id,

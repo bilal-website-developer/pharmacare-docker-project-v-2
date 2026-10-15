@@ -154,8 +154,9 @@ export class MemorySalesRepository implements SalesRepository {
     return customer;
   }
 
-  async posCatalog(shopId: ObjectId, today: Date): Promise<{ items: Array<Record<string, unknown>> }> {
+  async posCatalog(shopId: ObjectId, today: Date): Promise<{ today: string; items: Array<Record<string, unknown>> }> {
     return {
+      today: today.toISOString().slice(0, 10),
       items: this.medicines.filter((medicine) =>
         (medicine.shopId as ObjectId).equals(shopId) && medicine.isActive === true,
       ).map((medicine) => {

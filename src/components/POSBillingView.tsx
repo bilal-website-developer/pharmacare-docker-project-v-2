@@ -73,6 +73,7 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
   onOpenTemplatePreview,
 }) => {
   const [products, setProducts] = useState<PosCatalogProduct[]>([]);
+  const catalogToday = products[0]?.catalogToday ?? localIsoDate();
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState('');
   const [catalogRetry, setCatalogRetry] = useState(0);
@@ -267,7 +268,7 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
           const allocation = allocateFefo(
             product.batches,
             getRequiredSmallestUnits(quantity, unit.conversionFactor),
-            localIsoDate(),
+            catalogToday,
           );
           saleUnit = unit;
           targetBatch = product.batches.find((batch) => batch.id === allocation[0].batchId);
@@ -333,7 +334,7 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
         allocateFefo(
           product.batches,
           getRequiredSmallestUnits(newQty, unit.conversionFactor),
-          localIsoDate(),
+          catalogToday,
         );
       } catch (error) {
         setSaleError(error instanceof Error ? error.message : 'Unable to allocate stock for this item.');
@@ -365,7 +366,7 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
       allocateFefo(
         product.batches,
         getRequiredSmallestUnits(item.quantityInUnit, unit.conversionFactor),
-        localIsoDate(),
+        catalogToday,
       );
     } catch (error) {
       setSaleError(error instanceof Error ? error.message : 'Unable to allocate stock for this sale unit.');
@@ -473,7 +474,7 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
         const batchAllocations = allocateFefo(
           product.batches,
           getRequiredSmallestUnits(item.quantityInUnit, item.conversionFactor),
-          localIsoDate()
+          catalogToday
         );
         const firstBatch = product.batches.find((batch) => batch.id === batchAllocations[0].batchId);
         if (!firstBatch) throw new RangeError(`No eligible batch is available for ${item.productName}.`);

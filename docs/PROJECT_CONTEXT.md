@@ -6,7 +6,7 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phases 0–7 have server-side implementation; targeted replica-set tests pass locally. Phase 8 has wired auth/session, Stock Alerts, and Suppliers through the API client behind `VITE_BACKEND`; broader screen cut-over and manual UI acceptance remain pending.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phases 0–7 have server-side implementation; targeted replica-set tests pass locally. Phase 8 has wired auth/session, Stock Alerts, Suppliers, and POS catalog through the API client behind `VITE_BACKEND`; broader screen cut-over and manual UI acceptance remain pending.
 
 ## How to run
 
@@ -48,7 +48,7 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - Supabase Auth/Postgres: shared across clients connected to the same configured project. Products, Stock Inventory, and purchase workflows use server RPCs; Suppliers still has direct table reads/writes. Authorization and persistence are not uniform across every screen.
 - Supabase Edge Functions: the `manage-users` function exists; print approval, requester-name listing, audited receipt-only modification, and profile Trash Bin events use database RPCs/Edge Functions.
 - Browser `localStorage`: per-browser/device preferences, saved inventory views, purchase drafts, receipt settings, per-user stock-alert keys seen, and other UI settings. These do not synchronize across counters.
-- Mixed persistence on the legacy frontend: most screens still use Supabase and the Dashboard/Cash Book legacy views retain mock or in-memory behavior. Mongo APIs cover auth/users, catalog, purchase/stock, sales/customers, returns/voids, print requests, settings, expenses, cash book, reports, and dashboard summaries; auth/session, Stock Alerts, and Suppliers are wired in React so far. `medicineUnits` is a separate shop-scoped API collection (not the embedded-unit proposal) for independent CRUD and barcode uniqueness. Targeted business transaction paths are exercised against the local Mongo replica set; production and manual UI behavior remain unverified.
+- Mixed persistence on the legacy frontend: most screens still use Supabase and the Dashboard/Cash Book legacy views retain mock or in-memory behavior. Mongo APIs cover auth/users, catalog, purchase/stock, sales/customers, returns/voids, print requests, settings, expenses, cash book, reports, and dashboard summaries; React adapters currently cover auth/session, Stock Alerts, Suppliers, and POS catalog. `medicineUnits` is a separate shop-scoped API collection for independent CRUD and barcode uniqueness. Targeted business transaction paths are exercised against local Mongo; production and manual UI behavior remain unverified.
 - Other storage: unknown; no general file/object-storage workflow is established by the checked-in frontend docs.
 - Shared production data behavior depends on Supabase deployment and the live schema, which may differ from checked-in migrations.
 - The local Docker stack contains authenticated MongoDB on a private network and a Fastify API with health, auth, Manage Users, catalog, purchase, stock, sales, and Phase 7 routes. Local Compose startup, Mongo initialization/index creation, service health checks, `/api/health` proxy, and the targeted real-Mongo integration suite have passed. This is not production or manual UI acceptance. Legacy Supabase paths remain available.
@@ -93,26 +93,22 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Current status
 
-- **Current checkout:** branch `feature/mongo-migration`. Phases 0–7 have API implementation; latest verified evidence is recorded in `docs/MONGO_MIGRATION.md`. The targeted Compose suite covers 9 Mongo replica-set tests; `npm test` skips those tests outside Compose. Phase 8 has wired auth/session, Stock Alerts, and Suppliers; most React screens still use Supabase. No manual UI acceptance or production verification is available.
+- **Current checkout:** branch `feature/mongo-migration`. Phases 0–7 have API implementation; latest verified evidence is recorded in `docs/MONGO_MIGRATION.md`. The targeted Compose suite covers 9 Mongo replica-set tests; `npm test` skips those tests outside Compose. Phase 8 has wired auth/session, Stock Alerts, Suppliers, and POS catalog; most React screens still use Supabase. No manual UI acceptance or production verification is available.
 - **Added; migration owner-reported applied and RPC ACL checked:** Header Stock Alert Bell, accessible alert panel, per-user unseen indicators, permission-aware Products/Stock Inventory navigation, and stock-change refresh events. `stock_alerts_summary(integer)` and its rollback are in `supabase/migrations/20261013140000_stock_alerts_summary.sql` and `supabase/rollback/rollback_20261013140000_stock_alerts_summary.sql`; alert counts/data and UI behavior still need runtime testing.
 - **Verified in history:** The low-stock alert feature is committed as `da7ed5d` on `feature/low-stock-alerts`; it is present in that commit, not missing from the repository history.
 - **Fixed in `b62b547`:** Product-controlled label text is HTML-escaped in generated print markup using the shared receipt helper; hostile markup and quoted attribute payloads are covered by tests. The existing receipt/memo rendering behavior is unchanged.
-- **Done:** Phase 1 barcode validation and server-side generation work for `medicines.barcode`: reusable EAN-13 validation helpers, barcode renderer error handling, and product-page bulk generation actions. The corresponding migration files are staged under `supabase/migrations/20261012180000_assign_medicine_barcodes.sql` and the companion unique-index migration.
-- **Done:** Product barcode labels now open a dedicated print dialog with size/copies/field controls and a live preview; the old raw popup path was replaced by the reusable label dialog while preserving the product-page barcode generation flow.
+- **Done:** Phase 1 EAN-13 validation/generation and bulk assignment for `medicines.barcode`; product labels use a dedicated size/copies/fields print dialog. Migration files are under `supabase/migrations/20261012180000_assign_medicine_barcodes.sql` and its companion unique-index migration.
 - **Done:** Products and Master Data redesigns; Stock Inventory UI and server-function consumers; shared receipt renderer, POS printing, and print-request approval workflow. The owner reported Phase 4a migrations were run and verified. `docs/REDESIGN_PROGRESS.md` still labels Phase 4 pending; the newer source and owner report supersede that stale status.
-- **Added:** Barcode/labeling agent prompt at `docs/barcode-labels-agent-prompt.md` for follow-up product barcode generation, assignment, and print workflow work. UI and server-function consumers; shared receipt renderer, POS printing, and print-request approval workflow. The owner reported Phase 4a migrations were run and verified. `docs/REDESIGN_PROGRESS.md` still labels Phase 4 pending; the newer source and owner report supersede that stale status.
 - **In progress:** Purchases and Purchase History use RPCs. The owner reports that 4c's direct-table revokes are applied and verified in the test-data Supabase project. Verify the deployed `can_view_cost()` definition and table grants before release.
 - **In progress:** Products compact filter toolbar: debounced search, wrapping filter pills, removable active-filter chips, and a tested clear-all/reset helper. No RPC or database behavior changed.
 - **Done:** Manage Users list handling now falls back safely when response fields are absent and reports a likely stale `manage-users` deployment instead of crashing.
-- **Owner-reported applied; source verified:** POS checkout posts sales through `post_sale`, supports server-recorded cash/online/credit/split payments, and updates customer credit state. Owner reports `20261013160000_persist_sales_and_returns.sql` applied successfully after fixing two SQL syntax errors, and shared query results verify selected RPC ACL/security metadata. Runtime sale/return behavior has not yet been verified.
-- **SQL Editor corrections:** Fixed the apostrophe in the payment exception text (`customer''s`) and the missing empty-array fallback closing expression in `pending_sale_returns()`.
+- **Owner-reported applied; source verified:** POS checkout posts cash/online/credit/split sales and updates customer credit. Owner reports `20261013160000_persist_sales_and_returns.sql` applied after two SQL Editor syntax corrections; shared query results verify selected RPC ACL/security metadata. Runtime sale/return behavior remains unverified.
 - **Done in source (migration pending deployment):** Cashier print requests submit without a confirmation prompt; admin review displays requester names and can modify pending sale receipt snapshots with audited server-side validation. Changes are receipt-only and do not change completed sale records.
 - **Done in source (migration/Edge Function deployment pending):** Admin Trash Bin lists user deletions/restorations, product/supplier deactivations/restorations, and purchase voids with actor names, time, reason, entity filters, and only safe restore actions.
 - **Implemented locally:** Barcode validation, medicine-level EAN-13 generation and bulk assignment RPC files, and barcode printing are present. Client package commit `818af6c` adds Edit/Print/Make actions on product rows, cards, and a product-details dialog; per-product label quantities (1–200) with a 1,000-label job cap; a scanner test dialog; and fast keyboard-scanner handling in Products search and POS. Label printing requires an assigned barcode; it no longer falls back to the product code. Missing barcode-generation RPCs show an explicit notice. This package changed no SQL/schema and applied no migration. Real scanner/printer hardware remains untested.
-- **W6 TypeScript baseline:** `strict` and `noUnusedParameters` are enabled after both command-line measurements returned zero diagnostics. `noUnusedLocals` remains disabled because its 16 remaining diagnostics are in preserved components and the retained `RepositoryReviewView` import. The broader source cleanup is committed as `cce45bb`; ESLint packages/config remain pending owner approval and TypeScript 7 compatibility review. Details and release-date evidence are in `docs/EXECUTION_PROGRESS.md`.
-- **W7 client bundle optimization:** Sidebar screens and modal views load on demand (Dashboard, login, and shell remain eager); Purchase History XLSX, receipt print workflow, and barcode label code are deferred until used. Loading and retryable screen-error states are present. First-load production gzip measured 172.26 kB, down from 418.24 kB and below the 200 kB target. Lint, tests, and build pass; see `docs/EXECUTION_PROGRESS.md` for emitted chunk sizes. Physical slow/offline-network and route-refresh checks remain manual.
+- **W6/W7:** Strict and `noUnusedParameters` TypeScript checks pass; `noUnusedLocals` remains disabled for 16 preserved-component diagnostics. Sidebar/screens and heavy XLSX/print/barcode code are lazy-loaded; first-load gzip measured 172.26 kB (<200 kB). Physical slow/offline and route-refresh checks remain manual; see `docs/EXECUTION_PROGRESS.md`.
 - **Security ACL plan:** Owner-reported live ACL audit found `stock_batches` and the other four 4c cost-bearing tables revoked; a later `stock_batches` grant had undone its revoke once. Reassert revokes in the new lockdown migration. Staged files A-D and rollback scripts are proposals only and have not been applied. The owner reports profile DML already revoked; file D reasserts that state.
-- **Next:** Continue Phase 8 module migration, retaining the `VITE_BACKEND` fallback. Keep Supabase paths intact until the separately approved cut-over phase.
+- **Next / Phase 8 POS catalog:** Continue module migration with `VITE_BACKEND` and Supabase paths intact. `/api/pos/catalog` uses a strict safe-field adapter and supplies shop-local “today” for the FEFO preview; focused tests (6/6), full tests (191 passed, 0 failed, 9 skipped), lint/build, and real-Mongo suite (9/9) passed. Manual UI acceptance remains outstanding.
 
 ## Known issues and Later
 
@@ -176,15 +172,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-15T10:41:57.836Z
+Generated at (UTC): 2026-10-15T11:04:57.443Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: wire Suppliers module to Mongo API
 - docs: refresh generated project context
 - feat: implement Phase 7 business APIs
 - fix: pass Mongo replica-set transaction tests
 - fix: authenticate Mongo app user against app database
-- feat: API client, session and stock alerts (Phase 8 batch 1)
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
