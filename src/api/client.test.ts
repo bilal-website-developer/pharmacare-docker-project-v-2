@@ -50,6 +50,35 @@ test('retries one unauthorized API request after rotating the refresh cookie', a
   assert.equal(calls[2].authorization, 'Bearer rotated-access-token');
 });
 
+test('adds one idempotency key to writes and preserves it across an auth retry', async () => {
+  const keys: Array<string | null> = [];
+  setApiAccessToken('expired-access-token');
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    const headers = new Headers(init?.headers);
+    if (url === '/api/suppliers') {
+      keys.push(headers.get('Idempotency-Key'));
+      if (headers.get('Authorization') === 'Bearer expired-access-token') {
+        return Response.json({ error: 'UNAUTHENTICATED' }, { status: 401 });
+      }
+      return Response.json({ id: 'supplier-1' }, { status: 201 });
+    }
+    if (url === '/api/auth/refresh') {
+      return Response.json({ accessToken: 'rotated-access-token' });
+    }
+    return Response.json({ error: 'UNEXPECTED_REQUEST' }, { status: 500 });
+  };
+
+  const result = await apiRequest<{ id: string }>('/api/suppliers', {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Example supplier' }),
+  });
+
+  assert.equal(result.id, 'supplier-1');
+  assert.match(keys[0] ?? '', /^[0-9a-f-]{36}$/i);
+  assert.equal(keys[1], keys[0]);
+});
+
 test('uses a single refresh request for concurrent unauthorized calls', async () => {
   setApiAccessToken('expired-access-token');
   let refreshCount = 0;

@@ -133,7 +133,17 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     throw new ApiError('BACKEND_MISMATCH', 0, 'The API client is unavailable when VITE_BACKEND=supabase.');
   }
 
-  let response = await send(path, init, accessToken);
+  const requestInit: RequestInit = { ...init };
+  const method = (requestInit.method ?? 'GET').toUpperCase();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)
+    && !path.startsWith('/api/auth/')
+    && !new Headers(requestInit.headers).has('Idempotency-Key')) {
+    const headers = new Headers(requestInit.headers);
+    headers.set('Idempotency-Key', globalThis.crypto.randomUUID());
+    requestInit.headers = headers;
+  }
+
+  let response = await send(path, requestInit, accessToken);
   let payload = await readJson(response);
 
   if (response.status === 401 && path !== '/api/auth/login') {
@@ -148,7 +158,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
       notifySessionExpired();
       throw new ApiError('SESSION_EXPIRED', 401);
     }
-    response = await send(path, init, token);
+    response = await send(path, requestInit, token);
     payload = await readJson(response);
     if (response.status === 401) {
       notifySessionExpired();

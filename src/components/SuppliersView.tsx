@@ -1,22 +1,16 @@
 import React, { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Plus, RefreshCw, Save, Truck, X } from 'lucide-react';
+import { getBackend } from '../api';
+import {
+  deactivateSupplier as deactivateSupplierRequest,
+  listSuppliers as listSuppliersRequest,
+  saveSupplier as saveSupplierRequest,
+  type Supplier,
+  type SupplierInput,
+} from '../data/suppliers';
 import { supabase } from '../utils/supabase';
 
-interface Supplier {
-  id: string;
-  name: string;
-  contact: string;
-  address: string;
-  licence_or_tax_number: string;
-  payment_terms: string;
-  is_active: boolean;
-  created_at: string;
-}
-
-type SupplierForm = Pick<
-  Supplier,
-  'name' | 'contact' | 'address' | 'licence_or_tax_number' | 'payment_terms'
->;
+type SupplierForm = SupplierInput;
 
 const EMPTY_FORM: SupplierForm = {
   name: '',
@@ -25,9 +19,6 @@ const EMPTY_FORM: SupplierForm = {
   licence_or_tax_number: '',
   payment_terms: 'CASH',
 };
-
-const SUPPLIER_COLUMNS =
-  'id, name, contact, address, licence_or_tax_number, payment_terms, is_active, created_at';
 
 function describeError(error: { message: string; code?: string }): string {
   if (error.code === '42501' || error.code === 'PGRST301') {
@@ -54,9 +45,10 @@ export const SuppliersView: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const canUseSupplierForm = getBackend() === 'api' || Boolean(supabase);
 
   const loadSuppliers = useCallback(async () => {
-    if (!supabase) {
+    if (getBackend() === 'supabase' && !supabase) {
       setError('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then restart the app.');
       setLoading(false);
       return;
@@ -65,16 +57,7 @@ export const SuppliersView: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-      const { data, error: queryError } = await supabase
-        .from('suppliers')
-        .select(SUPPLIER_COLUMNS)
-        .order('name', { ascending: true });
-
-      if (queryError) {
-        setError(describeError(queryError));
-      } else {
-        setSuppliers(data as Supplier[]);
-      }
+      setSuppliers(await listSuppliersRequest());
     } catch (queryError) {
       setError(describeUnknownError(queryError));
     } finally {
@@ -93,10 +76,6 @@ export const SuppliersView: React.FC = () => {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!supabase) {
-      setError('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then restart the app.');
-      return;
-    }
 
     const name = form.name.trim();
     if (!name) {
@@ -116,15 +95,7 @@ export const SuppliersView: React.FC = () => {
     };
 
     try {
-      const { error: saveError } = await supabase.rpc('save_supplier', {
-        p_supplier_id: editingId,
-        p_name: values.name,
-        p_contact: values.contact,
-        p_address: values.address,
-        p_licence_or_tax_number: values.licence_or_tax_number,
-        p_payment_terms: values.payment_terms,
-      });
-      if (saveError) throw saveError;
+      await saveSupplierRequest(editingId, values);
       setNotice(editingId ? 'Supplier updated.' : 'Supplier added.');
       resetForm();
       await loadSuppliers();
@@ -149,19 +120,12 @@ export const SuppliersView: React.FC = () => {
   };
 
   const deactivateSupplier = async (supplier: Supplier) => {
-    if (!supabase) {
-      setError('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then restart the app.');
-      return;
-    }
     if (!window.confirm(`Deactivate ${supplier.name}? The supplier record will be kept.`)) return;
 
     setError('');
     setNotice('');
     try {
-      const { error: deactivateError } = await supabase.rpc('deactivate_supplier', {
-        p_supplier_id: supplier.id,
-      });
-      if (deactivateError) throw deactivateError;
+      await deactivateSupplierRequest(supplier.id);
 
       setSuppliers((current) =>
         current.map((item) => item.id === supplier.id ? { ...item, is_active: false } : item)
@@ -204,7 +168,7 @@ export const SuppliersView: React.FC = () => {
         </p>
       )}
 
-      {supabase && (
+      {canUseSupplierForm && (
         <form onSubmit={handleSubmit} className="space-y-4 rounded-card border border-border bg-white p-5 shadow-xs">
           <h3 className="text-sm font-bold text-text">{editingId ? 'Edit supplier' : 'Add supplier'}</h3>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -259,7 +223,7 @@ export const SuppliersView: React.FC = () => {
             {loading ? (
               <tr><td colSpan={6} className="visual-skeleton px-4 py-8 text-center text-muted">Loading suppliers…</td></tr>
             ) : suppliers.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted"><span className="supplier-empty-state inline-flex items-center justify-center gap-2"><Truck aria-hidden="true" className="supplier-empty-truck h-5 w-5" />No suppliers were returned. If suppliers already exist, check the table&apos;s Supabase Row Level Security SELECT policy.</span></td></tr>
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted"><span className="supplier-empty-state inline-flex items-center justify-center gap-2"><Truck aria-hidden="true" className="supplier-empty-truck h-5 w-5" />{getBackend() === 'api' ? 'No suppliers found.' : "No suppliers were returned. If suppliers already exist, check the table's Supabase Row Level Security SELECT policy."}</span></td></tr>
             ) : suppliers.map((supplier) => (
               <tr key={supplier.id} className={`supplier-table-row ${!supplier.is_active ? 'bg-surface/60 text-muted' : ''}`}>
                 <td className="px-4 py-3">

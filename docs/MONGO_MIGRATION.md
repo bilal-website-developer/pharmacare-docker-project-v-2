@@ -16,7 +16,7 @@ This file tracks migration phase deliverables and verification. It does not auth
 | 6 | POS sales and customer APIs | Implemented; selected Mongo transactions verified | Real replica-set tests cover sale rollback, unique customer ledger references, concurrent last-unit sale, and idempotency. Full route and operational acceptance remain open. |
 | 6b | Real Mongo verification and timezone consistency | Verified in local Compose integration suite | Shop-local “today” is used through stock, expiry, alert, purchase, adjustment, write-off, and sales logic. Karachi midnight boundary tests and real Mongo transactional cases pass; this is not production acceptance. |
 | 7 | Returns, voids, print requests, settings, expenses, cash book, reports, dashboard | Implemented; targeted Mongo tests passed | `server/src/phase7-routes.ts`; transactional business writes. The frontend remains on legacy paths pending Phase 8. |
-| 8 | Frontend API client and module-by-module switch | Batch 1 locally verified; manual checklist pending | Auth/session and Stock Alerts API adapter are wired behind `VITE_BACKEND`; Supabase fallback remains. `npm test` includes the API-client test. Local Fastify defaults to 3001; Compose explicitly uses private port 3000. |
+| 8 | Frontend API client and module-by-module switch | Batch 1 plus Suppliers module implemented; unit/build checks passed | Auth/session, Stock Alerts, and Suppliers use the API behind `VITE_BACKEND`; Supabase fallback remains. Remaining feature screens are not yet switched. Supplier manual UI checklist is below. |
 | 9 | Security hardening | Not started | Strict CORS/rate-limit sweep, route authorization sweep, npm audit report, and cashier cost-exclusion sweep remain open. |
 | 10 | Backups and production deployment | Not started | Backup/restore proof, production Compose, TLS proxy, and deployment documentation remain open. |
 | 11 | Demo data and manual test plan | Not started | Demo-only seed and per-role manual test plan remain open. |
@@ -134,3 +134,12 @@ docker compose run --build --rm api-test
 - Remaining: Phase 8 must connect React screens to these APIs. Manual browser/UI tests are not yet supplied; backup/deployment and security-hardening phases are not started. The idempotency reservation/transaction crash window recorded above remains a production risk.
 
 Implemented route paths include `/api/returns/policy`, `/api/returns/sales/:invoiceNumber`, `/api/sales/:id/returns`, `/api/returns/:id/approve|reject|process`, `/api/returns/:id/memo`, `/api/sales/:id/void`, `/api/print-requests*`, `/api/admin/print-requests*`, `/api/shop/settings`, `/api/expenses*`, `/api/cash-book`, `/api/reports/sales|stock`, and `/api/dashboard/summary`.
+
+## Autopilot step 4 progress — Suppliers frontend module
+
+**Status: WRITTEN-UNVERIFIED for manual UI acceptance.** `SuppliersView` now reads, creates, edits, and deactivates suppliers through the typed API adapter when `VITE_BACKEND=api`; `VITE_BACKEND=supabase` retains the Supabase implementation. Deactivation uses `PATCH isActive=false`, not the API soft-delete route, so inactive suppliers remain visible as in the existing UI. The shared API client now adds a unique `Idempotency-Key` to write requests and reuses it on an auth retry.
+
+- Focused tests: `npm run test:suppliers` passed 3/3; `npm run test:api-client` passed 5/5.
+- Full checks: `npm run lint` passed; `npm test` passed 197 tests, failed 0, skipped 9 (all Mongo replica-set integration tests are intentionally skipped outside Compose); `npm run build` passed with the existing Vite `__dirname` and large-chunk warnings.
+- Manual checklist (not yet run): with `VITE_BACKEND=api`, sign in as a user with `suppliers`; verify all active and inactive suppliers load and refresh; add a supplier; edit its contact/address/licence/payment terms; deactivate it and verify it remains listed as Inactive after refresh. Then set `VITE_BACKEND=supabase` and confirm the legacy list and write behavior still works. Purchase-selection behavior should be verified after the purchase screen is migrated.
+- Remaining modules include Products, Categories/Brands/Units and Master Data, Stock Inventory, Purchases/History, POS, Customers/Ledger, Sales History, Returns, Print Requests, Manage Users, Expenses/Cash Book, Reports/Dashboard, Trash Bin, Settings, and barcode/label/receipt integrations.
