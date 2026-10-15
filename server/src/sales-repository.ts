@@ -85,15 +85,15 @@ export class MongoSalesRepository implements SalesRepository {
   private async transact<T>(operation: (session: ClientSession) => Promise<T>): Promise<T> {
     const session = this.client.startSession();
     try {
-      let result: T | undefined;
+      let result: { value: T } | undefined;
       await session.withTransaction(async () => {
-        result = await operation(session);
+        result = { value: await operation(session) };
       }, {
         readConcern: { level: 'snapshot' },
         writeConcern: { w: 'majority' },
       });
       if (result === undefined) throw new Error('SALE_TRANSACTION_RESULT_MISSING');
-      return result;
+      return result.value;
     } finally {
       await session.endSession();
     }

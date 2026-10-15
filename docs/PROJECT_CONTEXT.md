@@ -150,7 +150,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 ## Changelog
 
 - 2026-10-15 — Phase 8 batch 1 wires auth/session and Stock Alerts through the API client behind `VITE_BACKEND`; API client tests are registered in the full test chain. Local Fastify defaults to port 3001 for the Vite proxy; Compose explicitly uses private port 3000. Lint/build pass; focused API client tests 4/4; full suite 184 pass, 0 fail, 7 Mongo integration skips. Manual UI and real-Mongo checks remain pending.
-- 2026-10-15 — Fixed Mongo app-user authentication in `mongo-init`: the app user is scoped to the application database, so its URI now uses that database as `authSource` (root user remains on `admin`). Compose initialized indexes and exited mongo-init 0; Mongo/API/web health and proxied `/api/health` HTTP 200 passed without resetting volumes.
+- 2026-10-15 — Fixed Mongo app-user authentication in `mongo-init`: app URI uses the app database as `authSource`, root remains on `admin`. Compose initialized indexes, mongo-init exited 0, Mongo/API/web were healthy, and proxied `/api/health` returned 200 without resetting volumes. Real replica-set tests passed 7/7, 0 skips after fixing void Int64 decrement, valid void transaction callbacks, and stock-conflict reply handling. Root lint/build pass; full tests report 184 passed, 0 failed, 7 real-Mongo skips.
 - 2026-10-15 — Phase 6b adds a Compose test runner and documented `.env`-backed command for seven real-Mongo integration tests, and aligns stock/sale expiry calculations to shop-local calendar days. Karachi midnight boundary and local checks passed (187 tests: 180 passed, 0 failed, 7 Mongo integration tests skipped); real Mongo execution awaits proof.
 - 2026-10-14 — Phases 5b/6 implemented Mongo idempotency, transactional sales, FEFO, role discount caps, split tender, customer credit, prescription capture, and sales history. Local tests/build passed; Mongo integration/runtime verification remained blocked.
 - 2026-10-14 — Implemented Phase 4 catalog/supplier APIs, EAN-13 registry, product CSV import/export, trash/restore, and role-based cost DTO filtering; updated design/tracker for separate `medicineUnits`. Root lint, full tests, and build pass locally; Mongo/Docker runtime and frontend cut-over remain unverified/not performed.
@@ -182,15 +182,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-15T09:13:47.189Z
+Generated at (UTC): 2026-10-15T09:27:16.777Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- fix: authenticate Mongo app user against app database
 - feat: API client, session and stock alerts (Phase 8 batch 1)
 - feat: align shop timezone expiry handling
 - feat: implement POS sales and customer APIs
 - docs: record expiry timezone decision
-- feat: add Mongo write idempotency checks
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`

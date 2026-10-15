@@ -102,6 +102,12 @@ function requireLong(value: bigint, field: string): Long {
   return Long.fromString(value.toString());
 }
 
+function requireSignedLong(value: bigint, field: string): Long {
+  const minimum = -(maxLong() + 1n);
+  if (value < minimum || value > maxLong()) throw new RangeError(`${field} exceeds the supported Int64 range`);
+  return Long.fromString(value.toString());
+}
+
 function asLong(value: unknown): Long {
   if (Long.isLong(value)) return value;
   if (typeof value === 'number' && Number.isSafeInteger(value)) return Long.fromNumber(value);
@@ -518,7 +524,7 @@ export class MongoStockRepository implements StockRepository {
         const netOwed = BigInt(credit.toString()) - BigInt(debit.toString());
         const supplierUpdate = await this.database.collection('suppliers').updateOne(
           { _id: purchase.supplierId, shopId, payableBalancePaisa: { $gte: requireLong(netOwed, 'supplier balance') } },
-          { $inc: { payableBalancePaisa: requireLong(-netOwed, 'supplier balance') } },
+          { $inc: { payableBalancePaisa: requireSignedLong(-netOwed, 'supplier balance') } },
           { session },
         );
         if (supplierUpdate.matchedCount !== 1) throw new Error('SUPPLIER_BALANCE_RECONCILIATION_FAILED');

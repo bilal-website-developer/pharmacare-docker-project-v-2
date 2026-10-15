@@ -12,7 +12,7 @@ This file tracks migration phase deliverables and verification. It does not auth
 | 3 | Authentication and Manage Users API | Implemented locally; awaiting owner-run Docker/runtime verification | Auth/session routes, authorization middleware, policy-aligned user routes, bootstrap CLI, and tests are in `server/`. This does not cut over the frontend or implement business modules. |
 | 4 | Catalog, product, and supplier API | Implemented locally; tests/build pass | Mongo/Docker runtime and live route verification are not performed. Route tests use in-memory repositories. |
 | 5 | Purchases and stock API | Implemented locally; source tests pass, owner runtime proof pending | Purchase posting/void, stock queries, adjustments, write-off, alert summary, and lazy expiry status refresh are in `server/`; Mongo transaction/runtime behavior is not verified. |
-| 5b | Mongo replica-set verification and write idempotency | Implemented locally; integration suite pending current run | An earlier local Compose attempt failed; the current initializer and health checks have now succeeded. Full replica-set behavioral verification is recorded separately below. Owner selected per-shop IANA timezones, defaulting to `Asia/Karachi`. |
+| 5b | Mongo replica-set verification and write idempotency | Real-Mongo suite passed locally | Seven replica-set integration tests pass with zero failures and zero skips when run with the Compose `api-test` service. This is local Docker verification, not production acceptance. Auth/session write routes remain outside the persisted business idempotency store for the documented credential-safety reason. |
 | 6 | POS sales and customer APIs | Implemented locally; Mongo runtime verification pending | Transactional sale/FEFO, discounts, payments, customers/khata, prescription capture, history, and local tests are implemented. Replica-set sale tests are present but were skipped because Mongo environment variables/runtime were unavailable. |
 | 6b | Real Mongo verification and timezone consistency | Implemented locally; real-Mongo verification awaits owner-run Compose | Added a Compose test runner for all seven replica-set tests and propagated shop-local “today” through stock, expiry, alert, purchase, adjustment, write-off, and sales logic. Run the documented Docker test steps to verify real Mongo behavior. |
 | 7+ | Remaining business API implementation | Not started | Preserve the Phase 2 Docker verification gate; implement transactions for every multi-document business write. |
@@ -34,6 +34,20 @@ This file tracks migration phase deliverables and verification. It does not auth
 - `curl.exe --silent --show-error --include http://localhost:8080/api/health` returned HTTP 200 and `{"status":"ok","database":"ok"}`.
 - The initial safe diagnostic captured the failing `connecting to Mongo as application user` step with Mongo code 18 / `AuthenticationFailed` and a generic errmsg; no URI or environment values were logged.
 - No volumes were deleted or reset. Business transaction behavior still depends on the real-Mongo integration tests in step 2.
+
+## Autopilot step 2 — replica-set tests and write invariants
+
+**Status: VERIFIED (local Docker replica set).** `docker compose run --build --rm api-test` reported 7 tests, 7 passed, 0 failed, 0 skipped. It exercised sales rollback, distinct customer ledger references, concurrent last-unit sale, purchase post/void rollback, per-shop unique indexes, concurrent stock adjustments, and idempotent replay. During the first run, it found and the code fixed:
+
+- Transaction callbacks returning `undefined` were incorrectly treated as absent results; valid callbacks now preserve their completion independently of their value.
+- Purchase void passed a valid negative Int64 payable delta through a nonnegative-only converter; signed Int64 bounds are now applied to the decrement.
+- The expected stock-concurrency conflict response was sent without being returned from its async route, which caused Fastify to log a duplicate-send error. The response helper now returns the reply. A later full integration run passed with no duplicate-send warning.
+
+Authenticated business writes use a per-shop/route/key-hash idempotency record with expiry. Auth login, refresh, and logout are intentionally excluded from this store because login/refresh responses carry credential material; see `docs/MONGO_DECISIONS.md`. API route review found each authenticated business write route uses the idempotency-aware `requireAuth` pre-handler.
+
+Stock expiry logic and boundary tests consistently use `Asia/Karachi` shop-local dates for the stock operations and sales; the existing unit boundary test checks 18:59:59.999Z and 19:00:00.000Z. `docs/OWNER_STEPS.md` contains the owner-run commands to create the initial shop and super-admin interactively without exposing the password.
+
+Validation after the fixes: `npm run lint` passed; `npm test` reported 191 tests, 184 passed, 0 failed, 7 skipped (only the real-Mongo cases skipped in this non-Compose runner); `npm run build` passed with the existing Vite `__dirname` and large-chunk warnings. The separately invoked Compose integration suite passed all 7 tests with 0 skips.
 
 ## Phase 1 verification and open items
 

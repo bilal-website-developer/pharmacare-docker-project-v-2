@@ -186,7 +186,7 @@ function batchMutationDto(batch: StockBatchRecord, before?: Long): Record<string
   };
 }
 
-function failureResponse(error: unknown, reply: FastifyReply): boolean {
+function failureResponse(error: unknown, reply: FastifyReply): FastifyReply | false {
   if (!(error instanceof Error)) return false;
   const responses: Record<string, { status: number; code: string }> = {
     ACTIVE_SUPPLIER_REQUIRED: { status: 400, code: 'ACTIVE_SUPPLIER_REQUIRED' },
@@ -213,8 +213,7 @@ function failureResponse(error: unknown, reply: FastifyReply): boolean {
   };
   const response = responses[error.message];
   if (!response) return false;
-  void reply.code(response.status).send({ error: response.code });
-  return true;
+  return reply.code(response.status).send({ error: response.code });
 }
 
 export function registerStockRoutes(
@@ -292,7 +291,8 @@ export function registerStockRoutes(
       );
       return reply.code(201).send(purchaseDetailDto(purchase, true));
     } catch (error) {
-      if (failureResponse(error, reply)) return;
+      const response = failureResponse(error, reply);
+      if (response) return response;
       throw error;
     }
   });
@@ -320,7 +320,8 @@ export function registerStockRoutes(
       if (!purchase) return reply.code(404).send({ error: 'NOT_FOUND' });
       return reply.send(purchaseDetailDto(purchase, roleCostView(caller)));
     } catch (error) {
-      if (failureResponse(error, reply)) return;
+      const response = failureResponse(error, reply);
+      if (response) return response;
       throw error;
     }
   });
@@ -382,7 +383,8 @@ export function registerStockRoutes(
         pageSize: parsed.data.pageSize,
       });
     } catch (error) {
-      if (failureResponse(error, reply)) return;
+      const response = failureResponse(error, reply);
+      if (response) return response;
       throw error;
     }
   });
@@ -423,7 +425,8 @@ export function registerStockRoutes(
       if (!batch) return reply.code(404).send({ error: 'NOT_FOUND' });
       return reply.send(batchMutationDto(batch));
     } catch (error) {
-      if (failureResponse(error, reply)) return;
+      const response = failureResponse(error, reply);
+      if (response) return response;
       throw error;
     }
   });
@@ -448,7 +451,8 @@ export function registerStockRoutes(
       if (!result) return reply.code(404).send({ error: 'NOT_FOUND' });
       return reply.send(batchMutationDto(result.batch, result.before));
     } catch (error) {
-      if (failureResponse(error, reply)) return;
+      const response = failureResponse(error, reply);
+      if (response) return response;
       throw error;
     }
   });
