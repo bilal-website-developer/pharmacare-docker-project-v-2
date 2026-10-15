@@ -109,6 +109,7 @@ export interface SaleItemRecord {
   medicineName: string;
   genericName: string;
   drugClass: string;
+  storageCondition?: string;
   unitId: ObjectId;
   unitName: string;
   conversionFactorBaseUnits: number;
@@ -142,7 +143,10 @@ export interface SaleRecord {
   amountTenderedPaisa: import('mongodb').Long;
   changePaisa: import('mongodb').Long;
   paymentMethod: 'CASH' | 'CARD' | 'CREDIT' | 'SPLIT';
-  status: 'COMPLETED';
+  status: 'COMPLETED' | 'VOID';
+  voidedAt?: Date;
+  voidedBy?: ObjectId;
+  voidReason?: string;
   items: SaleItemRecord[];
 }
 

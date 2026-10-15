@@ -185,12 +185,12 @@ All paths are under `/api/v1`. Body/query fields shown are logical Zod-validated
 | `GET /sales/:id/receipt` / `GET /sales/:id/payments/:paymentId/receipt` | `pos` or matching `pos_print_sale` / `pos_print_payment` | Sale/payment ID, paper size | ReceiptDTO only; cost/profit/margin excluded for every role and print output. |
 | `GET /customers/:customerId/payments/:paymentId/receipt` | `customers` | Customer/payment-ledger ID, paper size | Customer payment receipt DTO only; cost/profit/margin excluded. |
 | `POST /sales/:id/void` | Admin/Super Admin role + `sales_history`; idempotency | `{ reason }` | Safe void result; no receipt/cost leakage. Void feature/policy is proposed because no current SQL RPC was found. |
-| `GET /sales/lookup-for-return` | `pos` | Invoice number | Customer-safe SaleDTO and returnable quantities only; no cost. |
+| `GET /returns/sales/:invoiceNumber` | `pos` | Invoice number | Customer-safe SaleDTO and returnable quantities only; no cost. |
 | `POST /sales/:id/returns` | `pos`; idempotency | Reason + item/batch allocation IDs and base-unit quantities | Safe pending return DTO; no cost. |
 | `GET /returns/pending` | Manager/Admin role + `sales_history` | Date/page filters | Return-review DTO with original sale price/refund only; no cost. |
-| `POST /returns/:id/decision` | Manager/Admin role + `sales_history`; `stock_inventory` also required for any restock disposition; idempotency | Per-line disposition, sealed/intact evidence, reason | Safe decision/refund DTO; no cost. |
-| `GET /return-policy` | `pos` | None | `{ returnWindowDays, minimumRestockShelfLifeDays }`. |
-| `PATCH /return-policy` | Admin role + `pos` | Bounded policy values | Safe policy DTO + audit confirmation. |
+| `POST /returns/:id/approve` / `POST /returns/:id/reject` / `POST /returns/:id/process` | Manager/Admin role + `sales_history`; idempotency | Decision/reason or per-line disposition, sealed/intact evidence | Safe return DTO; no cost. |
+| `GET /returns/:id/memo` | `pos` | Return ID | Customer-safe return memo DTO; no cost. |
+| `GET /returns/policy` / `PATCH /returns/policy` | `pos`; Admin/Super Admin role for update; idempotency on writes | Bounded policy values | Safe policy DTO + audit confirmation. |
 | `GET /reports/sales` / `GET /reports/stock` / `GET /reports/purchases` | `reports`; purchase reports additionally `purchase_history` | Date range, grouping and allowlisted dimensions | Cashier receives no report unless explicitly permitted and then cost-free; Manager/Admin/Super Admin get permitted DTO; Accountant read-only; cost fields only under cost policy. |
 | `GET /reports/controlled-drugs` | `reports` plus `products` (or `sales_history` when filtered by sold records) | Date range, medicine class, page; no arbitrary export projection | Admin/Manager/Accountant DTO by granted permissions; includes only authorized prescription evidence and sale/dispense records; Cashier denied absent explicit report grant; no cost. |
 | `GET /expenses` / `POST /expenses` / `PATCH /expenses/:id` / `POST /expenses/:id/void` | `expenses`; Admin/Super Admin role for void | Date/category/page; integer amount/category/date; edit/void reason; idempotency on writes | Expense DTO, no purchase/product cost. No physical deletion. |
@@ -205,6 +205,10 @@ All paths are under `/api/v1`. Body/query fields shown are logical Zod-validated
 | `GET /admin/users` / `GET /admin/users/deleted` | `manage_users`; deleted listing Admin/Super Admin only | Search/page/status | UserDTO; non-Super Admin does not see Super Admin accounts. |
 | `POST /admin/users` / `PATCH /admin/users/:id` / `POST /admin/users/:id/reset-password` / `POST /admin/users/:id/deactivate` / `POST /admin/users/:id/restore` | `manage_users`; Super Admin role required to create/edit/delete Admin or Super Admin; idempotency for mutations | Whitelisted identity/role/permission fields; password only on reset/create; no self-role/permission/active change | UserDTO/AdminDTO safe view; never credentials/hash/tokens. Preserve last Admin/Super Admin and 99-user cap unless owner changes it. |
 | `GET /admin/audit-logs` | Admin/Super Admin role + `manage_users` or matching module permission for filtered own-shop events | Entity/actor/date/page | Safe append-only audit DTO; no raw request, token, secret or cost data. No write/delete endpoint. |
+
+### Phase 7 implementation mapping
+
+The table above describes the intended API contract. Implemented Phase 7 paths use the `/api` prefix and are registered in `server/src/phase7-routes.ts`: returns use `/api/returns/policy`, `/api/returns/sales/:invoiceNumber`, `/api/sales/:id/returns`, `/api/returns/:id/approve|reject|process|memo`; void uses `/api/sales/:id/void`; settings use `/api/shop/settings`; expenses and cash book use `/api/expenses*` and `/api/cash-book`; reports/dashboard use `/api/reports/sales`, `/api/reports/stock`, `/api/dashboard/summary`; print administration uses `/api/admin/print-requests*`. Phase 7 integration tests verify selected transaction and DTO behavior against the local replica set; this is not a production or full manual acceptance claim.
 | `GET /shop/profile` / `PATCH /shop/profile` | `manage_users`; Admin role for edit; no Super Admin cross-shop identity edit | Allowlisted shop identity/receipt settings | Shop profile DTO; only caller's shop. |
 
 Unknown routes and unsupported methods are denied. No route accepts a caller-selected shop identifier, arbitrary Mongo filter/sort/update expression, raw collection document, unbounded export, or caller-chosen output projection.

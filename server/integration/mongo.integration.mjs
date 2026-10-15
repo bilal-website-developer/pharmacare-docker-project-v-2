@@ -55,6 +55,10 @@ async function cleanShop(shopId) {
     'purchases',
     'supplierLedger',
     'cashBookEntries',
+    'saleReturns',
+    'returnPolicySettings',
+    'expenses',
+    'printRequests',
     'sales',
     'salePayments',
     'customerLedger',
@@ -134,7 +138,10 @@ async function withFixture(run) {
     fullName: 'Integration Manager',
     role: 'manager',
     isActive: true,
-    permissions: ['purchases', 'purchase_history', 'stock_inventory', 'pos', 'customers', 'sales_history'],
+    permissions: [
+      'purchases', 'purchase_history', 'stock_inventory', 'pos', 'customers',
+      'sales_history', 'expenses', 'reports', 'pos_print_sale', 'pos_print_payment',
+    ],
     passwordHash: '$argon2id$integration-only',
     failedLogins: 0,
     lockedUntil: null,
@@ -214,6 +221,7 @@ function accessToken(actor, config) {
 
 function saleInput(medicineId, unitId) {
   return {
+    customerName: '',
     items: [{ medicineId: medicineId.toHexString(), unitId: unitId.toHexString(), quantityInUnit: 1 }],
     discountPaisa: '0',
     payments: [{ method: 'CASH', amountPaisa: '150' }],
@@ -536,6 +544,334 @@ test('Mongo idempotency replays the saved successful response without a second s
         shopId,
         route: 'POST /api/stock/batches/:id/adjust',
         state: 'COMPLETED',
+      }), 1);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+test('Mongo returns enforce sold quantities, prevent double processing, and reconcile net sales and cash', { skip: !enabled }, async () => {
+  await withFixture(async ({ shopId, actor, input, medicineId, unitId }) => {
+    const stockRepository = new MongoStockRepository(client, config.mongoDbName);
+    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'), shopToday());
+    const salesRepository = new MongoSalesRepository(client, config.mongoDbName);
+    const sale = await salesRepository.postSale(
+      saleInput(medicineId, unitId), actor, audit(actor, 'sale.posted', 'sale'), shopToday(),
+    );
+    const cashier = {
+      ...actor,
+      _id: new ObjectId(),
+      username: `cashier-${randomUUID()}`,
+      usernameNormalized: `cashier-${randomUUID()}`,
+      email: `cashier-${randomUUID()}@example.test`,
+      emailNormalized: `cashier-${randomUUID()}@example.test`,
+      role: 'cashier',
+      permissions: ['pos', 'customers'],
+    };
+    await database.collection('users').insertOne(cashier);
+    const saleItem = sale.items[0];
+    const allocation = saleItem.batchAllocations[0];
+    assert.ok(allocation);
+    const app = createApp(client, config);
+    const headers = () => ({
+      authorization: `Bearer ${accessToken(actor, config)}`,
+      'idempotency-key': randomUUID(),
+    });
+    try {
+      await app.ready();
+      const cashierHeaders = {
+        authorization: `Bearer ${accessToken(cashier, config)}`,
+      };
+      const cashierCatalog = await app.inject({
+        method: 'GET', url: '/api/pos/catalog', headers: cashierHeaders,
+      });
+      assert.equal(cashierCatalog.statusCode, 200, cashierCatalog.body);
+      assert.doesNotMatch(JSON.stringify(cashierCatalog.json()), /(cost|profit|margin)/i);
+      const cashierReturnQueue = await app.inject({
+        method: 'GET', url: '/api/returns/pending', headers: cashierHeaders,
+      });
+      assert.equal(cashierReturnQueue.statusCode, 403);
+      const cashierExpenses = await app.inject({
+        method: 'GET', url: '/api/expenses', headers: cashierHeaders,
+      });
+      assert.equal(cashierExpenses.statusCode, 403);
+      const overReturn = await app.inject({
+        method: 'POST',
+        url: `/api/sales/${sale._id.toHexString()}/returns`,
+        headers: headers(),
+        payload: {
+          reason: 'Over-return attempt',
+          items: [{
+            saleItemId: saleItem._id.toHexString(),
+            allocationId: `${saleItem._id.toHexString()}:${allocation.batchId.toHexString()}`,
+            quantityBaseUnits: 2,
+          }],
+        },
+      });
+      assert.equal(overReturn.statusCode, 409);
+
+      const requestReturn = () => app.inject({
+        method: 'POST',
+        url: `/api/sales/${sale._id.toHexString()}/returns`,
+        headers: headers(),
+        payload: {
+          reason: 'Integration return',
+          items: [{
+            saleItemId: saleItem._id.toHexString(),
+            allocationId: `${saleItem._id.toHexString()}:${allocation.batchId.toHexString()}`,
+            quantityBaseUnits: 1,
+          }],
+        },
+      });
+      const concurrentRequests = await Promise.all([requestReturn(), requestReturn()]);
+      assert.deepEqual(concurrentRequests.map((result) => result.statusCode).sort(), [201, 409]);
+      const created = concurrentRequests.find((result) => result.statusCode === 201);
+      assert.ok(created);
+      assert.equal(created.statusCode, 201, created.body);
+      const returnRecord = created.json();
+      const approved = await app.inject({
+        method: 'POST',
+        url: `/api/returns/${returnRecord.id}/approve`,
+        headers: headers(),
+        payload: { note: 'Approved for processing' },
+      });
+      assert.equal(approved.statusCode, 200, approved.body);
+      assert.equal(approved.json().status, 'APPROVED');
+      const processBody = {
+        items: [{
+          id: returnRecord.items[0].id,
+          disposition: 'QUARANTINE',
+          sealedIntact: false,
+          restockUnitId: null,
+          reason: 'Quarantine test',
+        }],
+      };
+      await database.collection('cashBookEntries').insertOne({
+        shopId,
+        entryType: 'SALE_RETURN_PAYOUT_CASH',
+        direction: 'OUT',
+        amountPaisa: Long.ONE,
+        referenceType: 'SALE_RETURN',
+        referenceId: new ObjectId(returnRecord.id),
+        paymentMethod: 'CASH',
+        actorId: actor._id,
+        createdAt: new Date(),
+      });
+      const forcedFailure = await app.inject({
+        method: 'POST',
+        url: `/api/returns/${returnRecord.id}/process`,
+        headers: headers(),
+        payload: processBody,
+      });
+      assert.equal(forcedFailure.statusCode, 500);
+      assert.equal(await database.collection('stockBatches').countDocuments({
+        shopId, returnId: new ObjectId(returnRecord.id),
+      }), 0);
+      assert.equal(await database.collection('stockMovements').countDocuments({
+        shopId, referenceId: new ObjectId(returnRecord.id), movementType: 'SALE_RETURN',
+      }), 0);
+      assert.equal((await database.collection('saleReturns').findOne({
+        _id: new ObjectId(returnRecord.id), shopId,
+      })).status, 'APPROVED');
+      await database.collection('cashBookEntries').deleteOne({
+        shopId, referenceId: new ObjectId(returnRecord.id), entryType: 'SALE_RETURN_PAYOUT_CASH',
+      });
+      const processed = await app.inject({
+        method: 'POST',
+        url: `/api/returns/${returnRecord.id}/process`,
+        headers: headers(),
+        payload: processBody,
+      });
+      assert.equal(processed.statusCode, 200, processed.body);
+      assert.equal(processed.json().status, 'COMPLETED');
+      const duplicateProcess = await app.inject({
+        method: 'POST',
+        url: `/api/returns/${returnRecord.id}/process`,
+        headers: headers(),
+        payload: processBody,
+      });
+      assert.equal(duplicateProcess.statusCode, 409);
+
+      const report = await app.inject({ method: 'GET', url: '/api/reports/sales', headers: headers() });
+      assert.equal(report.statusCode, 200, report.body);
+      assert.equal(report.json().grossSalesPaisa, '150');
+      assert.equal(report.json().returnsPaisa, '150');
+      assert.equal(report.json().netSalesPaisa, '0');
+      const cashBook = await app.inject({ method: 'GET', url: '/api/cash-book', headers: headers() });
+      assert.equal(cashBook.statusCode, 200, cashBook.body);
+      assert.equal(cashBook.json().totals.inflowPaisa, '150');
+      assert.equal(cashBook.json().totals.outflowPaisa, '150');
+      assert.equal(cashBook.json().totals.expectedDrawerPaisa, '0');
+      assert.equal(await database.collection('stockMovements').countDocuments({
+        shopId, movementType: 'SALE_RETURN',
+      }), 1);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+test('Mongo expense, settings, print approval and sale void workflows persist with audit and cash reconciliation', { skip: !enabled }, async () => {
+  await withFixture(async ({ shopId, actor, input, medicineId, unitId }) => {
+    const stockRepository = new MongoStockRepository(client, config.mongoDbName);
+    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'), shopToday());
+    const salesRepository = new MongoSalesRepository(client, config.mongoDbName);
+    const sale = await salesRepository.postSale(
+      saleInput(medicineId, unitId), actor, audit(actor, 'sale.posted', 'sale'), shopToday(),
+    );
+    const app = createApp(client, config);
+    const headers = () => ({
+      authorization: `Bearer ${accessToken(actor, config)}`,
+      'idempotency-key': randomUUID(),
+    });
+    try {
+      await app.ready();
+      const expense = await app.inject({
+        method: 'POST',
+        url: '/api/expenses',
+        headers: headers(),
+        payload: {
+          category: 'Utilities', description: 'Integration expense',
+          amountPaisa: '500', occurredAt: new Date().toISOString(),
+        },
+      });
+      assert.equal(expense.statusCode, 201, expense.body);
+      const expenseId = expense.json().id;
+      const movedExpenseDate = new Date(Date.now() - 3 * 86_400_000);
+      const updatedExpense = await app.inject({
+        method: 'PATCH',
+        url: `/api/expenses/${expenseId}`,
+        headers: headers(),
+        payload: {
+          amountPaisa: '600',
+          occurredAt: movedExpenseDate.toISOString(),
+          reason: 'Corrected expense amount and date',
+        },
+      });
+      assert.equal(updatedExpense.statusCode, 200, updatedExpense.body);
+      assert.equal(updatedExpense.json().amountPaisa, '600');
+      const expenseEntries = await database.collection('cashBookEntries').find({
+        shopId, sourceExpenseId: new ObjectId(expenseId),
+      }).toArray();
+      assert.equal(expenseEntries.length, 3);
+      const shiftedDay = movedExpenseDate.toISOString().slice(0, 10);
+      const shiftedCashBook = await app.inject({
+        method: 'GET',
+        url: `/api/cash-book?dateFrom=${shiftedDay}&dateTo=${shiftedDay}`,
+        headers: headers(),
+      });
+      assert.equal(shiftedCashBook.statusCode, 200, shiftedCashBook.body);
+      assert.equal(shiftedCashBook.json().totals.outflowPaisa, '600');
+
+      const snapshot = {
+        data: {
+          kind: 'SALE', memoNo: sale.invoiceNumber, dateTime: sale.soldAt.toISOString(),
+          lines: [{
+            qty: sale.items[0].quantityInUnit,
+            name: sale.items[0].medicineName,
+            ratePaisa: Number(sale.items[0].pricePaisaPerUnit.toString()),
+          }],
+          discountPaisa: 0, cashier: actor.fullName, role: actor.role, terminal: 'Integration',
+        },
+        settings: {
+          storeName: 'Demo Pharmacy', address: '', phone: '', notes: ['', '', ''],
+          terminalName: 'Integration', showBatchExpiry: true, roundNet: 'none',
+          printTax: false, duplicateLabel: false, numberDigits: 6,
+        },
+        format: 'thermal80', template: 'pharmacy-memo',
+      };
+      const requested = await app.inject({
+        method: 'POST',
+        url: '/api/print-requests',
+        headers: headers(),
+        payload: { type: 'sale', receiptRef: sale.invoiceNumber, payload: snapshot },
+      });
+      assert.equal(requested.statusCode, 201, requested.body);
+      const printId = requested.json().id;
+
+      const mine = await app.inject({
+        method: 'GET', url: '/api/print-requests/mine', headers: headers(),
+      });
+      assert.equal(mine.statusCode, 200, mine.body);
+      assert.equal(mine.json().items.length, 1);
+      await database.collection('users').updateOne({ _id: actor._id, shopId }, { $set: { role: 'admin' } });
+      actor.role = 'admin';
+      const memoSettings = await app.inject({
+        method: 'PATCH',
+        url: '/api/shop/settings',
+        headers: headers(),
+        payload: { memoSettings: { showBatchExpiry: false } },
+      });
+      assert.equal(memoSettings.statusCode, 200, memoSettings.body);
+      const identityDenied = await app.inject({
+        method: 'PATCH',
+        url: '/api/shop/settings',
+        headers: headers(),
+        payload: { shopName: 'Unauthorized Shop Rename' },
+      });
+      assert.equal(identityDenied.statusCode, 403);
+
+      const queue = await app.inject({
+        method: 'GET', url: '/api/admin/print-requests', headers: headers(),
+      });
+      assert.equal(queue.statusCode, 200, queue.body);
+      assert.equal(queue.json().items.length, 1);
+      const pendingCount = await app.inject({
+        method: 'GET', url: '/api/admin/print-requests/pending-count', headers: headers(),
+      });
+      assert.equal(pendingCount.statusCode, 200, pendingCount.body);
+      assert.equal(pendingCount.json().count, 1);
+      const editedSnapshot = structuredClone(snapshot);
+      editedSnapshot.data.customerName = 'Receipt-only edit';
+      const modified = await app.inject({
+        method: 'PATCH',
+        url: `/api/admin/print-requests/${printId}/snapshot`,
+        headers: headers(),
+        payload: { payload: editedSnapshot, reason: 'Customer display correction' },
+      });
+      assert.equal(modified.statusCode, 200, modified.body);
+      assert.equal(modified.json().payload.data.customerName, 'Receipt-only edit');
+      const unchangedSale = await database.collection('sales').findOne({ _id: sale._id, shopId });
+      assert.equal(unchangedSale.customerName, sale.customerName);
+
+      const decision = await app.inject({
+        method: 'POST',
+        url: `/api/admin/print-requests/${printId}/decision`,
+        headers: headers(),
+        payload: { decision: 'approved', note: 'Approved for test' },
+      });
+      assert.equal(decision.statusCode, 200, decision.body);
+      const printed = await app.inject({
+        method: 'POST',
+        url: `/api/print-requests/${printId}/printed`,
+        headers: headers(),
+      });
+      assert.equal(printed.statusCode, 200, printed.body);
+
+      const voided = await app.inject({
+        method: 'POST',
+        url: `/api/sales/${sale._id.toHexString()}/void`,
+        headers: headers(),
+        payload: { reason: 'Integration void' },
+      });
+      assert.equal(voided.statusCode, 200, voided.body);
+      const voidedSale = await database.collection('sales').findOne({ _id: sale._id, shopId });
+      assert.equal(voidedSale.status, 'VOID');
+      const batch = await database.collection('stockBatches').findOne({ shopId, medicineId });
+      assert.equal(batch.quantityRemainingBaseUnits.toString(), '10');
+      const expenseVoid = await app.inject({
+        method: 'POST',
+        url: `/api/expenses/${expenseId}/void`,
+        headers: headers(),
+        payload: { reason: 'Integration expense void' },
+      });
+      assert.equal(expenseVoid.statusCode, 200, expenseVoid.body);
+      const cashBook = await app.inject({ method: 'GET', url: '/api/cash-book', headers: headers() });
+      assert.equal(cashBook.statusCode, 200, cashBook.body);
+      assert.equal(cashBook.json().totals.expectedDrawerPaisa, '0');
+      assert.equal(await database.collection('auditLogs').countDocuments({
+        shopId, event: 'print.marked_printed',
       }), 1);
     } finally {
       await app.close();

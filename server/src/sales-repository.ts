@@ -321,6 +321,20 @@ export class MongoSalesRepository implements SalesRepository {
         createdBy: actor._id,
         createdAt: now,
       }, { session });
+      if (input.method === 'CASH') {
+        await this.database.collection('cashBookEntries').insertOne({
+          _id: new ObjectId(),
+          shopId,
+          entryType: 'CUSTOMER_PAYMENT',
+          direction: 'IN',
+          amountPaisa: longFromBigInt(amount),
+          referenceType: 'CUSTOMER_PAYMENT',
+          referenceId: paymentId,
+          paymentMethod: 'CASH',
+          actorId: actor._id,
+          createdAt: now,
+        }, { session });
+      }
       await this.database.collection<AuditRecord>('auditLogs').insertOne(audit, { session });
       return {
         referenceNo: paymentNumber,
@@ -482,6 +496,7 @@ export class MongoSalesRepository implements SalesRepository {
             medicineName: String(item.medicine.name),
             genericName: String(item.medicine.genericName ?? ''),
             drugClass: String(item.medicine.drugClass ?? 'OTC'),
+            storageCondition: String(item.medicine.storageCondition ?? 'ROOM_TEMPERATURE'),
             unitId: item.unit._id as ObjectId,
             unitName: String(item.unit.name),
             conversionFactorBaseUnits: Number(item.unit.conversionFactorBaseUnits),
@@ -548,6 +563,21 @@ export class MongoSalesRepository implements SalesRepository {
           createdAt: now,
         }));
         await this.database.collection<SalePaymentRecord>('salePayments').insertMany(paymentRecords, { session });
+        const cashEntries = paymentRecords.filter((payment) => payment.method === 'CASH').map((payment) => ({
+          _id: new ObjectId(),
+          shopId: actor.shopId,
+          entryType: 'SALE_PAYMENT',
+          direction: 'IN',
+          amountPaisa: payment.amountPaisa,
+          referenceType: 'SALE_PAYMENT',
+          referenceId: payment._id,
+          paymentMethod: 'CASH',
+          actorId: actor._id,
+          createdAt: now,
+        }));
+        if (cashEntries.length > 0) {
+          await this.database.collection('cashBookEntries').insertMany(cashEntries, { session });
+        }
         await this.transactionCheckpoint('sale.after_payments');
 
         if (customer && creditAmount > 0n) {
@@ -582,6 +612,13 @@ export class MongoSalesRepository implements SalesRepository {
         }
         await this.transactionCheckpoint('sale.after_ledger');
         await this.database.collection<AuditRecord>('auditLogs').insertOne(audit, { session });
+        if (requestedDiscount > 0n) {
+          await this.database.collection<AuditRecord>('auditLogs').insertOne({
+            ...audit,
+            event: 'sale.discount_applied',
+            after: { discountPaisa: requestedDiscount.toString() },
+          }, { session });
+        }
         return sale;
       });
     } catch (error) {

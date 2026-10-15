@@ -17,6 +17,7 @@ import {
 } from './idempotency.js';
 import { MongoSalesRepository, type SalesRepository } from './sales-repository.js';
 import { registerSalesRoutes } from './sales-routes.js';
+import { registerPhaseSevenRoutes } from './phase7-routes.js';
 
 export function createApp(
   mongoClient: MongoClient,
@@ -115,6 +116,14 @@ export function createApp(
     registerSalesRoutes(
       app,
       salesRepository ?? new MongoSalesRepository(mongoClient, config.mongoDbName),
+      pharmacyRepository,
+      tokenConfig,
+      resolvedIdempotencyStore,
+    );
+    registerPhaseSevenRoutes(
+      app,
+      mongoClient,
+      config,
       pharmacyRepository,
       tokenConfig,
       resolvedIdempotencyStore,
