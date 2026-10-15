@@ -28,6 +28,7 @@ import { isAdminRole, PermissionsProvider, usePermissions } from './permissions'
 import {
   BillingPreferences,
   BillingTemplate,
+  DEFAULT_PHARMACY_MEMO_SETTINGS,
   ReceiptFormat,
   PharmacyMemoSettings,
   readBillingPreferencesWithMigration,
@@ -39,6 +40,8 @@ import {
   saveCompanyName,
   savePharmacyMemoSettings,
 } from './utils/storeSettings';
+import { loadShopSettings, updateShopSettings } from './data/shopSettings';
+import type { ShopProfile } from './data/shopSettings';
 import PharmaLogo from './components/PharmaLogo';
 import type { PrintReceiptHandler } from './utils/printWorkflow';
 import { STOCK_CHANGED_EVENT } from './utils/stockAlertsEvents';
@@ -273,6 +276,9 @@ function PharmacyWorkspace({
 
   const currentRole = session.role;
   const currentUserName = session.displayName;
+  const canEditShopSettings = isAdminRole(currentRole)
+    && (getBackend() !== 'api' || session.permissions.includes('manage_users'));
+  const canEditShopIdentity = getBackend() !== 'api' || currentRole === 'super_admin';
   const handlePrintReceipt: PrintReceiptHandler = React.useCallback(
     async (type, payload, options) => {
       const { printReceipt } = await import('./utils/printWorkflow');
@@ -341,7 +347,43 @@ function PharmacyWorkspace({
   const [memoSettings, setMemoSettings] = useState<PharmacyMemoSettings>(() =>
     readPharmacyMemoSettings(companyName)
   );
+  const [shopProfile, setShopProfile] = useState<ShopProfile>({
+    displayName: '',
+    address: '',
+    phone: '',
+    city: '',
+  });
   const [memoMigrationToast, setMemoMigrationToast] = useState(billingState.migratedClassicDefault);
+
+  useEffect(() => {
+    if (getBackend() !== 'api' || !session) return;
+    let active = true;
+    setCompanyName('');
+    setShopProfile({ displayName: '', address: '', phone: '', city: '' });
+    setMemoSettings(DEFAULT_PHARMACY_MEMO_SETTINGS);
+    setBillingPreferences({ template: 'pharmacy-memo', format: 'thermal80' });
+    setPreviewTemplate('pharmacy-memo');
+    void loadShopSettings()
+      .then((settings) => {
+        if (!active) return;
+        setCompanyName(settings.name);
+        setShopProfile(settings.profile);
+        setMemoSettings(settings.memoSettings);
+        setBillingPreferences(settings.receiptSettings);
+        setPreviewTemplate(settings.receiptSettings.template);
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setPrintNotice({
+            text: `Could not load shop settings: ${error instanceof Error ? error.message : 'The server returned an invalid response.'}`,
+            error: true,
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [session?.userId]);
 
   useEffect(() => {
     try {
@@ -492,24 +534,88 @@ function PharmacyWorkspace({
   }, [memoMigrationToast]);
 
   const updateBillingPreferences = (preferences: BillingPreferences) => {
+    if (getBackend() === 'api') {
+      void updateShopSettings({ receiptSettings: preferences })
+        .then((settings) => {
+          setBillingPreferences(settings.receiptSettings);
+          setPreviewTemplate(settings.receiptSettings.template);
+        })
+        .catch((error: unknown) => {
+          setPrintNotice({
+            text: `Could not save receipt settings: ${error instanceof Error ? error.message : 'The server returned an invalid response.'}`,
+            error: true,
+          });
+        });
+      return;
+    }
     setBillingPreferences(preferences);
     if (!saveBillingPreferences(preferences)) {
       window.alert('Template preference could not be saved in this browser.');
     }
   };
 
-  const updateMemoSettings = (settings: PharmacyMemoSettings): boolean => {
+  const updateMemoSettings = async (settings: PharmacyMemoSettings): Promise<boolean> => {
+    if (getBackend() === 'api') {
+      const editableSettings: Partial<PharmacyMemoSettings> = { ...settings };
+      if (currentRole !== 'super_admin') {
+        delete editableSettings.storeName;
+        delete editableSettings.address;
+        delete editableSettings.phone;
+      }
+      try {
+        const result = await updateShopSettings({
+          memoSettings: currentRole === 'super_admin'
+            ? settings
+            : editableSettings,
+        });
+        setMemoSettings(result.memoSettings);
+        return true;
+      } catch (error) {
+        setPrintNotice({
+          text: `Could not save Pharmacy Memo settings: ${error instanceof Error ? error.message : 'The server returned an invalid response.'}`,
+          error: true,
+        });
+        return false;
+      }
+    }
     if (!savePharmacyMemoSettings(settings)) return false;
     setMemoSettings(settings);
     return true;
   };
 
-  const updateCompanyName = (name: string): boolean => {
+  const updateCompanyName = async (name: string): Promise<boolean> => {
+    if (getBackend() === 'api') {
+      try {
+        const result = await updateShopSettings({ shopName: name.trim() });
+        setCompanyName(result.name);
+        return true;
+      } catch (error) {
+        setPrintNotice({
+          text: `Could not save the shop name: ${error instanceof Error ? error.message : 'The server returned an invalid response.'}`,
+          error: true,
+        });
+        return false;
+      }
+    }
     if (!saveCompanyName(name)) return false;
     setCompanyName(name.trim());
     return true;
   };
 
+  const updateShopProfile = async (profile: Pick<ShopProfile, 'phone' | 'city'>): Promise<boolean> => {
+    if (getBackend() !== 'api') return true;
+    try {
+      const result = await updateShopSettings({ profile });
+      setShopProfile(result.profile);
+      return true;
+    } catch (error) {
+      setPrintNotice({
+        text: `Could not save the shop profile: ${error instanceof Error ? error.message : 'The server returned an invalid response.'}`,
+        error: true,
+      });
+      return false;
+    }
+  };
   const openTemplatePreview = (template: BillingTemplate) => {
     setPreviewTemplate(template);
     setShowTemplatePreview(true);
@@ -834,7 +940,12 @@ function PharmacyWorkspace({
               sales={completedSales}
               currentUserName={currentUserName}
               activeTemplate={billingPreferences.template}
-              canEditBilling={isAdminRole(currentRole)}
+              canEditBilling={canEditShopSettings}
+              canEditReceiptSettings={getBackend() !== 'api' || canEditShopSettings}
+              maxMemoNumberDigits={getBackend() === 'api' ? 16 : 20}
+              canEditShopIdentity={canEditShopIdentity}
+              shopProfile={getBackend() === 'api' ? shopProfile : undefined}
+              onSaveShopProfile={updateShopProfile}
               onTemplateChange={(template: BillingTemplate) =>
                 updateBillingPreferences({ ...billingPreferences, template })
               }
@@ -877,7 +988,7 @@ function PharmacyWorkspace({
             initialTemplate={previewTemplate}
             initialFormat={billingPreferences.format}
             memoSettings={memoSettings}
-            canApply={isAdminRole(currentRole)}
+            canApply={canEditShopSettings}
             onApply={(template: BillingTemplate, format: ReceiptFormat) => {
               updateBillingPreferences({ template, format });
               setShowTemplatePreview(false);
