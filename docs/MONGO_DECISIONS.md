@@ -31,6 +31,11 @@ Decisions recorded while finishing the migration. Revisit a decision only when n
 ### Auth endpoint idempotency
 
 - **Decision:** Require persisted idempotency keys for authenticated write routes except `/api/auth/login`, `/api/auth/refresh`, and `/api/auth/logout`. Password changes use the store because their response contains no credentials.
+
+### Return review sequencing
+
+- **Decision:** In API mode, keep return approval and return processing as separate actions so the screen follows the server's `PENDING` → `APPROVED` → `COMPLETED` state transitions. Preserve the legacy Supabase flow as-is.
+- **Reason:** Processing is transactional and only accepts an approved return; an explicit approval action avoids presenting a client-side combined action that the API cannot honor atomically.
 - **Alternatives:** Persist response bodies for credential-bearing operations; build a separate encrypted/credential-safe replay protocol for session rotation.
 - **Reason:** Login/refresh responses contain access tokens and refresh-cookie rotation has credential lifecycle side effects. Persisting ordinary idempotency response bodies would retain token material. This exception must remain explicit in the security review; do not claim that every HTTP write route uses the business idempotency store.
 

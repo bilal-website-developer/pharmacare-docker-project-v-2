@@ -151,6 +151,7 @@ type ReturnItemRecord = {
   batchId: ObjectId;
   medicineId: ObjectId;
   medicineName: string;
+  unitName?: string;
   batchNumber: string;
   expiryDate: Date;
   drugClass: string;
@@ -186,6 +187,12 @@ function safeLong(value: bigint): Long {
 
 function id(value: unknown): string | null {
   return value instanceof ObjectId ? value.toHexString() : null;
+}
+
+function dateText(value: unknown): string {
+  const date = value instanceof Date ? value : typeof value === 'string' ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) throw new Error('INVALID_STORED_DATE');
+  return date.toISOString().slice(0, 10);
 }
 
 function audit(user: Caller, event: string, entityType: string, entityId?: ObjectId): AuditRecord {
@@ -314,11 +321,13 @@ function returnDto(record: Document): Record<string, unknown> {
     decidedByName: record.decidedByName ?? null,
     note: record.note ?? null,
     refundPaisa: asLong(record.refundPaisa ?? Long.ZERO).toString(),
+    refundMethod: record.refundMethod ?? null,
     items: items.map((item) => ({
       id: id(item._id),
       saleItemId: id(item.saleItemId),
       allocationId: `${id(item.saleItemId)}:${id(item.batchId)}`,
       medicineName: item.medicineName,
+      unitName: item.unitName ?? '',
       batchNumber: item.batchNumber,
       expiryDate: item.expiryDate,
       drugClass: item.drugClass,
@@ -387,9 +396,11 @@ export function registerPhaseSevenRoutes(
     const user = caller(request, reply);
     if (!user) return;
     const policy = await database.collection('returnPolicySettings').findOne({ shopId: user.shopId });
+    const timeZone = await shopTimeZone(authRepository, user.shopId);
     return reply.send({
       returnWindowDays: Number(policy?.returnWindowDays ?? 7),
       minimumRestockShelfLifeDays: Number(policy?.minimumRestockShelfLifeDays ?? 90),
+      today: timezoneToday(timeZone).toISOString().slice(0, 10),
     });
   });
 
@@ -433,27 +444,40 @@ export function registerPhaseSevenRoutes(
         returned.set(key, (returned.get(key) ?? 0n) + BigInt(asLong(item.quantityBaseUnits).toString()));
       }
     }
+    const timeZone = await shopTimeZone(authRepository, user.shopId);
     return reply.send({
       id: id(sale._id),
       invoiceNumber: sale.invoiceNumber,
-      saleDate: sale.soldAt,
+      saleDate: timezoneToday(timeZone, sale.soldAt as Date).toISOString().slice(0, 10),
+      customerId: sale.customerId instanceof ObjectId ? id(sale.customerId) : null,
       customerName: sale.customerName,
-      items: ((sale.items ?? []) as Array<Document>).flatMap((saleItem) =>
-        ((saleItem.batchAllocations ?? []) as Array<Document>).map((allocation) => {
+      totalPaisa: asLong(sale.totalPaisa).toString(),
+      items: ((sale.items ?? []) as Array<Document>).map((saleItem) => ({
+        saleItemId: id(saleItem._id),
+        medicineId: id(saleItem.medicineId),
+        productName: String(saleItem.medicineName ?? ''),
+        genericName: String(saleItem.genericName ?? ''),
+        unitName: String(saleItem.unitName ?? ''),
+        conversionFactor: Number(saleItem.conversionFactorBaseUnits),
+        quantityInUnit: Number(saleItem.quantityInUnit),
+        quantityBaseUnits: asLong(saleItem.quantityBaseUnits).toString(),
+        lineTotalPaisa: asLong(saleItem.lineTotalPaisa).toString(),
+        drugClass: String(saleItem.drugClass ?? 'OTC'),
+        storageCondition: String(saleItem.storageCondition ?? ''),
+        allocations: ((saleItem.batchAllocations ?? []) as Array<Document>).map((allocation) => {
           const saleItemId = saleItem._id as ObjectId;
           const batchId = allocation.batchId as ObjectId;
           const key = `${saleItemId.toHexString()}:${batchId.toHexString()}`;
           return {
-            saleItemId: saleItemId.toHexString(),
             allocationId: key,
-            medicineName: saleItem.medicineName,
-            batchNumber: allocation.batchNumber,
-            expiryDate: allocation.expiryDate,
+            batchId: batchId.toHexString(),
+            batchNumber: String(allocation.batchNumber ?? ''),
+            expiryDate: dateText(allocation.expiryDate),
             quantityBaseUnits: asLong(allocation.quantityBaseUnits).toString(),
             alreadyReturnedBaseUnits: (returned.get(key) ?? 0n).toString(),
           };
         }),
-      ),
+      })),
     });
   });
 
@@ -517,6 +541,7 @@ export function registerPhaseSevenRoutes(
             batchId: allocation.batchId as ObjectId,
             medicineId: saleItem.medicineId as ObjectId,
             medicineName: String(saleItem.medicineName),
+            unitName: String(saleItem.unitName ?? ''),
             batchNumber: String(allocation.batchNumber),
             expiryDate: allocation.expiryDate as Date,
             drugClass,
@@ -571,7 +596,62 @@ export function registerPhaseSevenRoutes(
       shopId: user.shopId, status: { $in: ['PENDING', 'APPROVED'] },
     })
       .sort({ requestedAt: 1, _id: 1 }).limit(200).toArray();
-    return reply.send({ items: rows.map(returnDto) });
+    const timeZone = await shopTimeZone(authRepository, user.shopId);
+    const items = await Promise.all(rows.map(async (record) => {
+      const sale = await database.collection('sales').findOne({
+        _id: record.saleId,
+        shopId: user.shopId,
+        status: 'COMPLETED',
+      });
+      if (!sale) throw new Error('RETURN_SALE_NOT_FOUND');
+      const saleItems = (sale.items ?? []) as Array<Document>;
+      const returnItems = record.items as ReturnItemRecord[];
+      const medicineIds = [...new Map(returnItems.map((item) => [id(item.medicineId), item.medicineId])).values()];
+      const units = medicineIds.length > 0
+        ? await database.collection('medicineUnits').find({
+          shopId: user.shopId,
+          medicineId: { $in: medicineIds },
+          deletedAt: null,
+        }, {
+          projection: { _id: 1, medicineId: 1, name: 1, conversionFactorBaseUnits: 1 },
+        }).toArray()
+        : [];
+      return {
+        id: id(record._id),
+        saleId: id(record.saleId),
+        status: record.status,
+        invoiceNumber: String(record.invoiceNumber),
+        saleDate: timezoneToday(timeZone, sale.soldAt as Date).toISOString().slice(0, 10),
+        customerName: String(sale.customerName ?? ''),
+        reason: String(record.reason ?? ''),
+        requestedBy: String(record.requestedByName ?? ''),
+        requestedAt: (record.requestedAt as Date).toISOString(),
+        items: returnItems.map((item) => {
+          const saleItem = saleItems.find((candidate) => id(candidate._id) === id(item.saleItemId));
+          if (!saleItem) throw new Error('RETURN_SALE_ITEM_NOT_FOUND');
+          return {
+            id: id(item._id),
+            saleItemId: id(item.saleItemId),
+            medicineId: id(item.medicineId),
+            productName: String(item.medicineName),
+            unitName: String(item.unitName ?? saleItem.unitName ?? ''),
+            conversionFactor: Number(saleItem.conversionFactorBaseUnits),
+            quantityBaseUnits: asLong(item.quantityBaseUnits).toString(),
+            batchId: id(item.batchId),
+            batchNumber: String(item.batchNumber),
+            expiryDate: dateText(item.expiryDate),
+            drugClass: String(item.drugClass ?? 'OTC'),
+            storageCondition: String(item.storageCondition ?? ''),
+            medicineUnits: units.filter((unit) => id(unit.medicineId) === id(item.medicineId)).map((unit) => ({
+              id: id(unit._id),
+              name: String(unit.name),
+              conversionFactor: Number(unit.conversionFactorBaseUnits),
+            })),
+          };
+        }),
+      };
+    }));
+    return reply.send({ items });
   });
 
   app.post('/api/returns/:id/approve', { preHandler: [...salesHistory, requireRole('manager', 'admin', 'super_admin')] }, async (request, reply) => {
@@ -735,6 +815,9 @@ export function registerPhaseSevenRoutes(
         if (movements.length) await database.collection('stockMovements').insertMany(movements, { session });
         const salePayments = await database.collection('salePayments').find({ shopId: user.shopId, saleId: sale._id }, { session }).toArray();
         const isCreditSale = salePayments.length === 1 && salePayments[0]?.method === 'CREDIT';
+        const refundMethod = isCreditSale ? 'CREDIT'
+          : salePayments.length > 1 ? 'SPLIT'
+            : salePayments[0]?.method === 'CARD' ? 'CARD' : 'CASH';
         if (isCreditSale && sale.customerId instanceof ObjectId) {
           const customer = await database.collection('customers').findOne({ _id: sale.customerId, shopId: user.shopId }, { session });
           if (customer) {
@@ -774,7 +857,10 @@ export function registerPhaseSevenRoutes(
         }
         const updated = await returns.findOneAndUpdate(
           { _id: returnId, shopId: user.shopId, status: 'APPROVED' },
-          { $set: { status: 'COMPLETED', items, refundPaisa: safeLong(refund), decidedBy: user._id, decidedByName: user.fullName, decidedAt: now } },
+          { $set: {
+            status: 'COMPLETED', items, refundPaisa: safeLong(refund), refundMethod,
+            decidedBy: user._id, decidedByName: user.fullName, decidedAt: now,
+          } },
           { returnDocument: 'after', includeResultMetadata: false, session },
         );
         if (!updated) throw new Error('RETURN_ALREADY_PROCESSED');

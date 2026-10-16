@@ -5,6 +5,7 @@ import {
   isRecord,
   isString,
 } from './sales';
+import { apiRequest, getBackend } from '../api';
 import type { ReturnDisposition } from './returnLogic';
 
 export interface SaleReturnAllocation {
@@ -60,6 +61,7 @@ export interface PendingReturnItem {
 export interface PendingSaleReturn {
   id: string;
   saleId: string;
+  status?: 'PENDING' | 'APPROVED';
   invoiceNumber: string;
   saleDate: string;
   customerName: string;
@@ -72,6 +74,7 @@ export interface PendingSaleReturn {
 export interface ReturnPolicySettings {
   returnWindowDays: number;
   minimumRestockShelfLifeDays: number;
+  today?: string;
 }
 
 export interface SaleReturnRequestItem {
@@ -92,7 +95,7 @@ export interface CompletedSaleReturn {
   id: string;
   invoiceNumber: string;
   status: 'COMPLETED';
-  refundMethod: 'CASH' | 'CREDIT';
+  refundMethod: 'CASH' | 'CARD' | 'CREDIT' | 'SPLIT';
   refundTotalPaisa: number;
   customerBalancePaisa: number | null;
   customerStoreCreditPaisa: number | null;
@@ -201,7 +204,8 @@ function isCompletedReturn(value: unknown): value is CompletedSaleReturn {
     && isString(value.id)
     && isString(value.invoiceNumber)
     && value.status === 'COMPLETED'
-    && (value.refundMethod === 'CASH' || value.refundMethod === 'CREDIT')
+    && (value.refundMethod === 'CASH' || value.refundMethod === 'CARD'
+      || value.refundMethod === 'CREDIT' || value.refundMethod === 'SPLIT')
     && isNonNegativeInteger(value.refundTotalPaisa)
     && (value.customerBalancePaisa === null || isNonNegativeInteger(value.customerBalancePaisa))
     && (value.customerStoreCreditPaisa === null || isNonNegativeInteger(value.customerStoreCreditPaisa))
@@ -214,11 +218,185 @@ function isCompletedReturn(value: unknown): value is CompletedSaleReturn {
       && isNonNegativeInteger(item.refundPaisa));
 }
 
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length && keys.every((key) => key in value);
+}
+
+const RETURN_DTO_KEYS = [
+  'id', 'returnNumber', 'saleId', 'invoiceNumber', 'status', 'reason', 'requestedAt',
+  'requestedByName', 'decidedAt', 'decidedByName', 'note', 'refundPaisa', 'refundMethod', 'items',
+] as const;
+const RETURN_ITEM_DTO_KEYS = [
+  'id', 'saleItemId', 'allocationId', 'medicineName', 'unitName', 'batchNumber', 'expiryDate',
+  'drugClass', 'storageCondition', 'quantityBaseUnits', 'refundPaisa', 'disposition', 'reason',
+] as const;
+
+function isReturnDto(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && exactKeys(value, RETURN_DTO_KEYS)
+    && Array.isArray(value.items)
+    && value.items.every((item) => isRecord(item) && exactKeys(item, RETURN_ITEM_DTO_KEYS));
+}
+
+function apiInteger(value: unknown, positive = false): number | null {
+  if (typeof value !== 'string' || !/^(0|[1-9]\d*)$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && (!positive || parsed > 0) ? parsed : null;
+}
+
+function parseApiPolicy(value: unknown): ReturnPolicySettings {
+  if (!isRecord(value)
+    || !(exactKeys(value, ['returnWindowDays', 'minimumRestockShelfLifeDays'])
+      || exactKeys(value, ['returnWindowDays', 'minimumRestockShelfLifeDays', 'today']))
+    || !isNonNegativeInteger(value.returnWindowDays)
+    || !isNonNegativeInteger(value.minimumRestockShelfLifeDays)
+    || ('today' in value && !isDate(value.today))) {
+    throw new Error('The returns service returned invalid settings.');
+  }
+  return {
+    returnWindowDays: value.returnWindowDays,
+    minimumRestockShelfLifeDays: value.minimumRestockShelfLifeDays,
+    ...('today' in value && typeof value.today === 'string' ? { today: value.today } : {}),
+  };
+}
+
+function parseApiSale(value: unknown): SaleForReturn {
+  if (!isRecord(value) || !exactKeys(value, [
+    'id', 'invoiceNumber', 'saleDate', 'customerId', 'customerName', 'totalPaisa', 'items',
+  ]) || !Array.isArray(value.items)) {
+    throw new Error('The returns service returned invalid sale details.');
+  }
+  const totalPaisa = apiInteger(value.totalPaisa);
+  if (totalPaisa === null) throw new Error('The returns service returned invalid sale details.');
+  const items = value.items.map((rawItem) => {
+    if (!isRecord(rawItem) || !exactKeys(rawItem, [
+      'saleItemId', 'medicineId', 'productName', 'genericName', 'unitName', 'conversionFactor',
+      'quantityInUnit', 'quantityBaseUnits', 'lineTotalPaisa', 'drugClass', 'storageCondition', 'allocations',
+    ]) || !Array.isArray(rawItem.allocations)) {
+      throw new Error('The returns service returned invalid sale details.');
+    }
+    const quantityBaseUnits = apiInteger(rawItem.quantityBaseUnits, true);
+    const lineTotalPaisa = apiInteger(rawItem.lineTotalPaisa);
+    const allocations = rawItem.allocations.map((rawAllocation) => {
+      if (!isRecord(rawAllocation) || !exactKeys(rawAllocation, [
+        'allocationId', 'batchId', 'batchNumber', 'expiryDate', 'quantityBaseUnits', 'alreadyReturnedBaseUnits',
+      ])) throw new Error('The returns service returned invalid sale details.');
+      const allocated = apiInteger(rawAllocation.quantityBaseUnits, true);
+      const alreadyReturned = apiInteger(rawAllocation.alreadyReturnedBaseUnits);
+      if (allocated === null || alreadyReturned === null) {
+        throw new Error('The returns service returned invalid sale details.');
+      }
+      return { ...rawAllocation, quantityBaseUnits: allocated, alreadyReturnedBaseUnits: alreadyReturned };
+    });
+    if (quantityBaseUnits === null || lineTotalPaisa === null) {
+      throw new Error('The returns service returned invalid sale details.');
+    }
+    return { ...rawItem, quantityBaseUnits, lineTotalPaisa, allocations };
+  });
+  const result = { ...value, totalPaisa, items };
+  if (!isSaleForReturn(result)) throw new Error('The returns service returned invalid sale details.');
+  return result;
+}
+
+function parseApiPendingReturn(value: unknown): PendingSaleReturn {
+  if (!isRecord(value) || !exactKeys(value, [
+    'id', 'saleId', 'status', 'invoiceNumber', 'saleDate', 'customerName', 'reason',
+    'requestedBy', 'requestedAt', 'items',
+  ]) || (value.status !== 'PENDING' && value.status !== 'APPROVED') || !Array.isArray(value.items)) {
+    throw new Error('The returns service returned invalid pending requests.');
+  }
+  const items = value.items.map((rawItem) => {
+    if (!isRecord(rawItem) || !exactKeys(rawItem, [
+      'id', 'saleItemId', 'medicineId', 'productName', 'unitName', 'conversionFactor',
+      'quantityBaseUnits', 'batchId', 'batchNumber', 'expiryDate', 'drugClass', 'storageCondition',
+      'medicineUnits',
+    ]) || !Array.isArray(rawItem.medicineUnits)) {
+      throw new Error('The returns service returned invalid pending requests.');
+    }
+    const quantityBaseUnits = apiInteger(rawItem.quantityBaseUnits, true);
+    const medicineUnits = rawItem.medicineUnits.map((rawUnit) => {
+      if (!isRecord(rawUnit) || !exactKeys(rawUnit, ['id', 'name', 'conversionFactor'])) {
+        throw new Error('The returns service returned invalid pending requests.');
+      }
+      return rawUnit;
+    });
+    if (quantityBaseUnits === null) throw new Error('The returns service returned invalid pending requests.');
+    const parsed = { ...rawItem, quantityBaseUnits, medicineUnits };
+    if (!isPendingReturnItem(parsed)) throw new Error('The returns service returned invalid pending requests.');
+    return parsed;
+  });
+  const result = { ...value, items };
+  if (!isPendingReturn(result)) throw new Error('The returns service returned invalid pending requests.');
+  return result;
+}
+
+function parseApiRequestResponse(value: unknown): { id: string; status: 'PENDING'; invoiceNumber: string } {
+  if (!isReturnDto(value) || !isString(value.id) || value.status !== 'PENDING'
+    || !isString(value.invoiceNumber)) {
+    throw new Error('The returns service returned an invalid request response.');
+  }
+  return { id: value.id, status: 'PENDING', invoiceNumber: value.invoiceNumber };
+}
+
+function parseApiCompletedReturn(value: unknown): CompletedSaleReturn {
+  if (!isReturnDto(value) || !isString(value.id) || !isString(value.invoiceNumber)
+    || value.status !== 'COMPLETED'
+    || !['CASH', 'CARD', 'CREDIT', 'SPLIT'].includes(String(value.refundMethod))
+    || !Array.isArray(value.items)) {
+    throw new Error('The returns service returned an invalid completed return.');
+  }
+  const refundTotalPaisa = apiInteger(value.refundPaisa);
+  if (refundTotalPaisa === null) throw new Error('The returns service returned an invalid completed return.');
+  const items = value.items.map((rawItem) => {
+    if (!isRecord(rawItem) || !exactKeys(rawItem, RETURN_ITEM_DTO_KEYS)
+      || !isString(rawItem.medicineName) || !isString(rawItem.unitName)
+      || !['RESTOCK', 'QUARANTINE', 'WRITE_OFF'].includes(String(rawItem.disposition))) {
+      throw new Error('The returns service returned an invalid completed return.');
+    }
+    const quantityBaseUnits = apiInteger(rawItem.quantityBaseUnits, true);
+    const refundPaisa = apiInteger(rawItem.refundPaisa);
+    if (quantityBaseUnits === null || refundPaisa === null) {
+      throw new Error('The returns service returned an invalid completed return.');
+    }
+    return {
+      productName: rawItem.medicineName,
+      unitName: rawItem.unitName,
+      quantityBaseUnits,
+      disposition: rawItem.disposition,
+      refundPaisa,
+    };
+  });
+  const result = {
+    id: value.id,
+    invoiceNumber: value.invoiceNumber,
+    status: 'COMPLETED' as const,
+    refundMethod: value.refundMethod as CompletedSaleReturn['refundMethod'],
+    refundTotalPaisa,
+    customerBalancePaisa: null,
+    customerStoreCreditPaisa: null,
+    items,
+  };
+  if (!isCompletedReturn(result)) throw new Error('The returns service returned an invalid completed return.');
+  return result;
+}
+
+function parseApiDecisionResponse(value: unknown, status: 'APPROVED' | 'REJECTED'): void {
+  if (!isReturnDto(value) || value.status !== status || !isString(value.id)) {
+    throw new Error('The returns service returned an invalid decision response.');
+  }
+}
+
 export async function getReturnPolicySettings(): Promise<ReturnPolicySettings> {
+  if (getBackend() === 'api') return parseApiPolicy(await apiRequest<unknown>('/api/returns/policy'));
   return callSupabaseRpc('get_return_policy_settings', undefined, 'Could not load return settings.', isPolicy);
 }
 
 export async function updateReturnPolicySettings(settings: ReturnPolicySettings): Promise<ReturnPolicySettings> {
+  if (getBackend() === 'api') {
+    return parseApiPolicy(await apiRequest<unknown>('/api/returns/policy', {
+      method: 'PATCH',
+      body: JSON.stringify(settings),
+    }));
+  }
   return callSupabaseRpc('update_return_policy_settings', {
     p_return_window_days: settings.returnWindowDays,
     p_minimum_restock_shelf_life_days: settings.minimumRestockShelfLifeDays,
@@ -226,6 +404,11 @@ export async function updateReturnPolicySettings(settings: ReturnPolicySettings)
 }
 
 export async function loadSaleForReturn(invoiceNumber: string): Promise<SaleForReturn> {
+  if (getBackend() === 'api') {
+    return parseApiSale(await apiRequest<unknown>(
+      `/api/returns/sales/${encodeURIComponent(invoiceNumber)}`,
+    ));
+  }
   return callSupabaseRpc('sale_for_return', { p_invoice_number: invoiceNumber }, 'Could not find the sale.', isSaleForReturn);
 }
 
@@ -234,6 +417,12 @@ export async function requestSaleReturn(
   reason: string,
   items: readonly SaleReturnRequestItem[],
 ): Promise<{ id: string; status: 'PENDING'; invoiceNumber: string }> {
+  if (getBackend() === 'api') {
+    return parseApiRequestResponse(await apiRequest<unknown>(`/api/sales/${encodeURIComponent(saleId)}/returns`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, items }),
+    }));
+  }
   return callSupabaseRpc('request_sale_return', {
     p_sale_id: saleId,
     p_reason: reason,
@@ -246,6 +435,13 @@ export async function requestSaleReturn(
 }
 
 export async function loadPendingSaleReturns(): Promise<PendingSaleReturn[]> {
+  if (getBackend() === 'api') {
+    const response: unknown = await apiRequest('/api/returns/pending');
+    if (!isRecord(response) || !exactKeys(response, ['items']) || !Array.isArray(response.items)) {
+      throw new Error('The returns service returned invalid pending requests.');
+    }
+    return response.items.map(parseApiPendingReturn);
+  }
   return callSupabaseRpc('pending_sale_returns', undefined, 'Could not load pending returns.', (value): value is PendingSaleReturn[] =>
     Array.isArray(value) && value.every(isPendingReturn));
 }
@@ -254,6 +450,12 @@ export async function processSaleReturn(
   returnId: string,
   decisions: readonly SaleReturnDecision[],
 ): Promise<CompletedSaleReturn> {
+  if (getBackend() === 'api') {
+    return parseApiCompletedReturn(await apiRequest<unknown>(
+      `/api/returns/${encodeURIComponent(returnId)}/process`,
+      { method: 'POST', body: JSON.stringify({ items: decisions }) },
+    ));
+  }
   return callSupabaseRpc('process_sale_return', {
     p_return_id: returnId,
     p_decisions: decisions.map((decision) => ({
@@ -267,9 +469,26 @@ export async function processSaleReturn(
 }
 
 export async function rejectSaleReturn(returnId: string, reason: string): Promise<void> {
+  if (getBackend() === 'api') {
+    const response: unknown = await apiRequest(`/api/returns/${encodeURIComponent(returnId)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    parseApiDecisionResponse(response, 'REJECTED');
+    return;
+  }
   await callSupabaseRpc('reject_sale_return', {
     p_return_id: returnId,
     p_reason: reason,
   }, 'Could not reject the return request.', (value): value is { id: string; status: 'REJECTED' } =>
     isRecord(value) && isString(value.id) && value.status === 'REJECTED');
+}
+
+export async function approveSaleReturn(returnId: string): Promise<void> {
+  if (getBackend() !== 'api') throw new Error('Return approval is only available through the API backend.');
+  const response: unknown = await apiRequest(`/api/returns/${encodeURIComponent(returnId)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  parseApiDecisionResponse(response, 'APPROVED');
 }

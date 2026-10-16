@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check, LoaderCircle, RefreshCw, X } from 'lucide-react';
+import { getBackend } from '../../api';
 import {
+  approveSaleReturn,
   getReturnPolicySettings,
   loadPendingSaleReturns,
   loadSaleForReturn,
@@ -167,7 +169,7 @@ export const SaleReturnsPanel: React.FC<SaleReturnsPanelProps> = ({ canReview, c
       expiryDate: item.expiryDate,
       returnWindowDays: policy.returnWindowDays,
       minimumShelfLifeDays: policy.minimumRestockShelfLifeDays,
-      today: new Date().toISOString().slice(0, 10),
+      today: policy.today ?? new Date().toISOString().slice(0, 10),
     });
     if (reason) return reason;
     if (!draft.restockUnitId) return 'Select the original sealed package type.';
@@ -208,6 +210,21 @@ export const SaleReturnsPanel: React.FC<SaleReturnsPanelProps> = ({ canReview, c
       await refreshPending();
     } catch (processError) {
       setError(processError instanceof Error ? processError.message : 'Could not process the return.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const approveRequest = async (request: PendingSaleReturn) => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await approveSaleReturn(request.id);
+      setNotice(`Return request for ${request.invoiceNumber} was approved.`);
+      await refreshPending();
+    } catch (approvalError) {
+      setError(approvalError instanceof Error ? approvalError.message : 'Could not approve the return request.');
     } finally {
       setBusy(false);
     }
@@ -332,7 +349,7 @@ export const SaleReturnsPanel: React.FC<SaleReturnsPanelProps> = ({ canReview, c
               {canReview && (
                 <section className="space-y-3 border-t border-border pt-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-bold text-text">Pending approval ({pending.length})</h3>
+                    <h3 className="font-bold text-text">Return requests ({pending.length})</h3>
                     <button type="button" onClick={() => void refreshPending()} disabled={busy} aria-label="Refresh pending returns" className="rounded-control p-2 text-muted hover:bg-surface-muted">
                       <RefreshCw size={16} />
                     </button>
@@ -344,6 +361,7 @@ export const SaleReturnsPanel: React.FC<SaleReturnsPanelProps> = ({ canReview, c
                         <div>
                           <h4 className="font-bold text-text">{request.invoiceNumber}</h4>
                           <p className="text-sm text-muted">{request.customerName} · requested by {request.requestedBy}</p>
+                          {request.status && <p className="text-xs font-semibold text-muted">{request.status}</p>}
                           <p className="text-sm text-text">{request.reason}</p>
                         </div>
                       </div>
@@ -415,12 +433,27 @@ export const SaleReturnsPanel: React.FC<SaleReturnsPanelProps> = ({ canReview, c
                         );
                       })}
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => void processRequest(request)} disabled={busy} className="inline-flex items-center gap-2 rounded-control bg-primary px-3 py-2 text-sm font-bold text-white disabled:opacity-60">
-                          <Check size={15} /> Approve and process
-                        </button>
-                        <button type="button" onClick={() => void rejectRequest(request)} disabled={busy} className="rounded-control border border-border px-3 py-2 text-sm font-semibold text-text hover:bg-surface-muted disabled:opacity-60">
-                          Reject request
-                        </button>
+                        {getBackend() === 'api' && request.status === 'PENDING' ? (
+                          <>
+                            <button type="button" onClick={() => void approveRequest(request)} disabled={busy} className="inline-flex items-center gap-2 rounded-control bg-primary px-3 py-2 text-sm font-bold text-white disabled:opacity-60">
+                              <Check size={15} /> Approve return
+                            </button>
+                            <button type="button" onClick={() => void rejectRequest(request)} disabled={busy} className="rounded-control border border-border px-3 py-2 text-sm font-semibold text-text hover:bg-surface-muted disabled:opacity-60">
+                              Reject request
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button type="button" onClick={() => void processRequest(request)} disabled={busy} className="inline-flex items-center gap-2 rounded-control bg-primary px-3 py-2 text-sm font-bold text-white disabled:opacity-60">
+                              <Check size={15} /> Process return
+                            </button>
+                            {!(getBackend() === 'api' && request.status === 'APPROVED') && (
+                              <button type="button" onClick={() => void rejectRequest(request)} disabled={busy} className="rounded-control border border-border px-3 py-2 text-sm font-semibold text-text hover:bg-surface-muted disabled:opacity-60">
+                                Reject request
+                              </button>
+                            )}
+                          </>
+                        )}
                       </div>
                     </article>
                   ))}
