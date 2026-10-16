@@ -30,7 +30,7 @@ Decisions recorded while finishing the migration. Revisit a decision only when n
 
 ### Auth endpoint idempotency
 
-- **Decision:** Require persisted idempotency keys for authenticated business writes. Keep `/api/auth/login`, `/api/auth/refresh`, and `/api/auth/logout` outside that business idempotency store.
+- **Decision:** Require persisted idempotency keys for authenticated write routes except `/api/auth/login`, `/api/auth/refresh`, and `/api/auth/logout`. Password changes use the store because their response contains no credentials.
 - **Alternatives:** Persist response bodies for credential-bearing operations; build a separate encrypted/credential-safe replay protocol for session rotation.
 - **Reason:** Login/refresh responses contain access tokens and refresh-cookie rotation has credential lifecycle side effects. Persisting ordinary idempotency response bodies would retain token material. This exception must remain explicit in the security review; do not claim that every HTTP write route uses the business idempotency store.
 

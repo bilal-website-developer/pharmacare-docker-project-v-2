@@ -9,6 +9,8 @@ import {
   setModulePermission,
   setPosPrintPermission,
 } from '../permissions';
+import { getBackend } from '../api/config';
+import { changeOwnPassword, invokeManageUsersApi } from '../data/manageUsers';
 import { supabase } from '../utils/supabase';
 
 const MAX_USERS = 99;
@@ -45,6 +47,7 @@ const EMPTY_FORM: UserForm = {
 };
 
 export async function invokeManageUsers<T>(body: Record<string, unknown>): Promise<T> {
+  if (getBackend() === 'api') return invokeManageUsersApi<T>(body);
   if (!supabase) throw new Error('Supabase is not configured.');
   const { data, error } = await supabase.functions.invoke('manage-users', { body });
   if (error) {
@@ -332,6 +335,23 @@ export function ManageUsersView({
                 </label>
               ))}
             </div>
+            {getBackend() === 'api' && grantablePermissions.includes('stock_alerts') && (
+              <label className="mt-3 flex items-center gap-2 text-sm text-text">
+                <input
+                  type="checkbox"
+                  checked={form.role === UserRole.SUPER_ADMIN || form.permissions.includes('stock_alerts')}
+                  disabled={form.role === UserRole.SUPER_ADMIN || (form.role === UserRole.ADMIN && !isSuperAdmin)}
+                  onChange={(event) => {
+                    const permissions = new Set(form.permissions);
+                    if (event.target.checked) permissions.add('stock_alerts');
+                    else permissions.delete('stock_alerts');
+                    setForm({ ...form, permissions: [...permissions] });
+                  }}
+                  className="h-4 w-4 accent-green-700"
+                />
+                Stock Alerts
+              </label>
+            )}
             {hasPosPrintToggles(form.permissions) && (
               <div className="mt-4 space-y-3 border-t border-border pt-4">
                 {([
@@ -435,6 +455,24 @@ export function ChangePasswordModal({
     if (newPassword !== confirmPassword) {
       setError(true);
       setMessage('New password and confirmation do not match.');
+      return;
+    }
+    if (getBackend() === 'api') {
+      setSaving(true);
+      setMessage('');
+      try {
+        await changeOwnPassword(currentPassword, newPassword);
+        setError(false);
+        setMessage('Password changed successfully.');
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } catch (caught) {
+        setError(true);
+        setMessage(caught instanceof Error ? caught.message : 'Could not change the password.');
+      } finally {
+        setSaving(false);
+      }
       return;
     }
     if (!supabase) {

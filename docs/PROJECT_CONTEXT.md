@@ -6,9 +6,9 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phases 0–7 have server-side implementation; targeted replica-set tests pass locally. Phase 8 has wired auth/session, Stock Alerts, Suppliers, POS catalog, Settings, POS sales, Customer Ledger, Sales History, and Master Data overview/units/merge operations through the API client behind `VITE_BACKEND`; broader screen cut-over and manual UI acceptance remain pending.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phases 0–7 have server-side implementation; Phase 8 has API wiring for auth/session, Stock Alerts, Suppliers, POS catalog/settings/sales, Customer Ledger, Sales History, Master Data, Cash Book/expenses, Print Requests, and Manage Users. Remaining screen cut-over, manual UI acceptance, and production verification are open.
 
-- Latest modules: Master Data, persisted Cash Book/expense creation, and print requests use authenticated API routes with strict DTO validation; Supabase fallback paths remain available when `VITE_BACKEND=supabase`.
+- Latest modules: Manage Users CRUD and self-service password changes use authenticated API routes with strict DTO validation; Supabase fallback remains available when `VITE_BACKEND=supabase`.
 - Step 0 housekeeping: fixed the Vite proxy target to the Docker API default (`:3000`), kept a `VITE_API_PROXY_TARGET` override for direct host-mode Fastify dev on `:3001`, and documented the intended Docker vs. host API port split.
 
 ## How to run
@@ -96,48 +96,18 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Current status
 
-- **Current checkout:** branch `feature/mongo-migration`. Phases 0–7 have API implementation; latest evidence is in `docs/MONGO_MIGRATION.md`. The Compose suite covers 10 Mongo replica-set tests; `npm test` skips them outside Compose. Phase 8 has wired auth/session, Stock Alerts, Suppliers, POS catalog, Settings, POS sales, and Customer Ledger account/payment operations; most React screens still use Supabase. No manual UI acceptance or production verification is available.
-- **Added; migration owner-reported applied and RPC ACL checked:** Header Stock Alert Bell, accessible alert panel, per-user unseen indicators, permission-aware Products/Stock Inventory navigation, and stock-change refresh events. `stock_alerts_summary(integer)` and its rollback are in `supabase/migrations/20261013140000_stock_alerts_summary.sql` and `supabase/rollback/rollback_20261013140000_stock_alerts_summary.sql`; alert counts/data and UI behavior still need runtime testing.
-- **Fixed in `b62b547`:** Product-controlled label text is HTML-escaped in generated print markup using the shared receipt helper; hostile markup and quoted attribute payloads are covered by tests. The existing receipt/memo rendering behavior is unchanged.
-- **Done:** Phase 1 EAN-13 validation/generation and bulk assignment for `medicines.barcode`; product labels use a dedicated size/copies/fields print dialog. Migration files are under `supabase/migrations/20261012180000_assign_medicine_barcodes.sql` and its companion unique-index migration.
-- **Done:** Products and Master Data redesigns; Stock Inventory UI and server-function consumers; shared receipt renderer, POS printing, and print-request approval workflow. The owner reported Phase 4a migrations were run and verified. `docs/REDESIGN_PROGRESS.md` still labels Phase 4 pending; the newer source and owner report supersede that stale status.
-- **In progress:** Purchases and Purchase History use RPCs. The owner reports that 4c's direct-table revokes are applied and verified in the test-data Supabase project. Verify the deployed `can_view_cost()` definition and table grants before release.
-- **In progress:** Products compact filter toolbar: debounced search, wrapping filter pills, removable active-filter chips, and a tested clear-all/reset helper. No RPC or database behavior changed.
-- **Done:** Manage Users list handling now falls back safely when response fields are absent and reports a likely stale `manage-users` deployment instead of crashing.
-- **Owner-reported applied; source verified:** POS checkout posts cash/online/credit/split sales and updates customer credit. Owner reports `20261013160000_persist_sales_and_returns.sql` applied after two SQL Editor syntax corrections; shared query results verify selected RPC ACL/security metadata. Runtime sale/return behavior remains unverified.
-- **Done in source (migration pending deployment):** Cashier print requests submit without a confirmation prompt; admin review displays requester names and can modify pending sale receipt snapshots with audited server-side validation. Changes are receipt-only and do not change completed sale records.
-- **Done in source (migration/Edge Function deployment pending):** Admin Trash Bin lists user deletions/restorations, product/supplier deactivations/restorations, and purchase voids with actor names, time, reason, entity filters, and only safe restore actions.
-- **Implemented locally:** Barcode validation, medicine-level EAN-13 generation and bulk assignment RPC files, and barcode printing are present. Client package commit `818af6c` adds Edit/Print/Make actions on product rows, cards, and a product-details dialog; per-product label quantities (1–200) with a 1,000-label job cap; a scanner test dialog; and fast keyboard-scanner handling in Products search and POS. Label printing requires an assigned barcode; it no longer falls back to the product code. Missing barcode-generation RPCs show an explicit notice. This package changed no SQL/schema and applied no migration. Real scanner/printer hardware remains untested.
-- **W6/W7:** Strict and `noUnusedParameters` TypeScript checks pass; `noUnusedLocals` remains disabled for 16 preserved-component diagnostics. Sidebar/screens and heavy XLSX/print/barcode code are lazy-loaded; first-load gzip measured 172.26 kB (<200 kB). Physical slow/offline and route-refresh checks remain manual; see `docs/EXECUTION_PROGRESS.md`.
-- **Security ACL plan:** Owner-reported live ACL audit found `stock_batches` and the other four 4c cost-bearing tables revoked; a later `stock_batches` grant had undone its revoke once. Reassert revokes in the new lockdown migration. Staged files A-D and rollback scripts are proposals only and have not been applied. The owner reports profile DML already revoked; file D reasserts that state.
-- **Next / Phase 8:** Continue remaining module migrations with `VITE_BACKEND` and Supabase paths intact. POS checkout, Customer Ledger account/payment operations, and Sales History now use typed API adapters. History preserves void status and excludes voided sales from displayed revenue/EOD totals; the history DTO remains cost-free, so profit KPIs need the Mongo reports API wiring. Manual UI acceptance remains outstanding.
+- **Current checkout:** `feature/mongo-migration`. Phase 8 coverage and current test evidence are tracked in `docs/MONGO_MIGRATION.md`; all manual UI and production acceptance remain outstanding.
+- The Supabase implementation remains intact as the alternate backend. Owner-reported migration/ACL state and source-only barcode/Trash Bin changes are historical context, not live verification; do not run Supabase operations as part of the Mongo migration.
+- Existing UI behavior includes POS split tender, customer credit, cashier print requests, audited receipt-only print edits, role-based cost visibility, barcode/label workflows, stock alerts, and Trash Bin; API-mode replacements are still incomplete for several screens.
+- Security and runtime gates still open: verify the production Supabase ACL only if separately authorized, complete Mongo route-wide security checks, and obtain manual API-mode acceptance before cut-over. Keep Supabase code and migrations untouched.
 
 ## Known issues and Later
 
-- Owner-approved multi-shop decisions and the detailed implementation plan are in `docs/MULTI_SHOP_FULL_PLAN.md` and `docs/MASTER_PLAN.md`: one user per shop; Super Admin has a separate audited target-shop catalog-seeding write but no general business-data access; emergency-only, explicitly audited support access where technically possible; suspension blocks sign-in and business operations; licence/billing dates deferred; staff-selectable Settings, while shop Admins retain all own-shop modules and cannot edit identity. Shop identity/receipt details must use one server-backed profile. No implementation or database changes have been made for these decisions.
-- Legacy Supabase UI still grants Admin roles every module and keeps Settings Admin-only. The React Settings screen now uses Mongo settings in API mode; identity edits require Super Admin. API-mode Settings and POS UI behavior still need manual acceptance.
-- DBCode VS Code extension reported a SQL language-server startup timeout followed by closed connections in editor logs on 2026-10-13; the exact cause is unknown and no database operation or project runtime failure is indicated by those log lines.
-- Live Supabase schema/RPC availability may lag behind checked-in migrations; verify migration state before diagnosing app behavior.
-- Legacy Supabase readiness remains separate from the Mongo work: owner-supplied live catalog/ACL results (2026-10-14) show expected return tables/functions exist, while migration-history and post-lockdown ACL proof remain unavailable. Mongo API has cashier DTO filtering, prescription enforcement, persisted cash book/return payout, and live report/dashboard routes; full route-wide security sweep and manual UI acceptance remain open.
-- A previous sign-in error was reported, but current authentication/runtime status was not tested in this audit. POS source requires active medicine, configured units, and positive eligible stock; the stock alert function requires `min_stock_alert > 0` for both low and out alerts.
-- The print-request requester-name and modify RPCs in `20261012160000_modify_print_requests.sql` are local until that migration is applied to the target Supabase project.
-- Trash Bin event schema/triggers/listing/restore RPCs in `20261012170000_trash_bin_history.sql` and the updated `manage-users` Edge Function are local until migration and function deployment.
-- Barcode workflow is partial: assignment targets `medicines.barcode`; the checked-in unique index is global and does not cover `medicine_units.barcode` or future shops. Client actions, per-product label quantities, scanner test, and POS/Products keyboard scanning are implemented, but live RPC availability, unit-barcode scanning, cross-shop uniqueness, and physical scanner/printer output are unverified. Product label printing supports linear formats only; QR-code generation is not implemented. Owner reported manually running the legacy barcode SQL, but no live schema query was performed in this checkout.
-- Supabase bootstrap hazard: `supabase/baseline/00_baseline_schema.sql` is a reconstructed schema reference, not a complete dump. The migration directory also contains timestamped barcode rollback files; do not apply them as forward migrations. Bootstrap instructions and metadata-only comparison queries are in `docs/STAGING_BOOTSTRAP.md`.
-- Approved business rule: positive stock in `ACTIVE`/`NEAR_EXPIRY` batches for an active medicine remains sellable through expiry (`expiry_date >= current_date`). `src/utils/fefo.ts` uses this boundary; verify the deployed RPC uses the same rule.
-- Trash Bin tracks app product/supplier deactivation and purchase-void workflows; out-of-band physical deletions made through another client or dashboard are not captured.
-- Print requests are stored in `public.print_requests`; the admin UI has no permanent-delete action. Removing a request row does not remove its related audit-log history.
-- Mongo shop memo/receipt settings are persisted server-side, but the React settings screen is not wired to them; existing Supabase-mode preferences remain browser-local.
-- Sale-return request/review is implemented in source and the owner reports its SQL migration applied, but end-to-end sale/return behavior is not yet verified against the database. Sales History reprint is not implemented; return memo rendering and print-request review are separate.
-- Direct ESC/POS printer-driver support is not implemented; browser printing uses the browser print dialog.
-- Several screens still use mock/in-memory data; identify persistence from the current component before changing it.
-- Supplier contact insert/update/deactivation is still performed directly by the browser; consider a permission-checked RPC plan.
-- Mongo role/permission enforcement and targeted integration tests exist; route-wide hardening, backups/restore, production deployment, and physical printer controls remain open.
-- The legacy Supabase POS/catalog paths remain as described in `docs/audit/LOGIC_AUDIT.md`. Mongo APIs enforce prescription details at sale, persist expenses/cash-book activity, and compute return-adjusted reports/dashboard from Mongo; frontend cut-over remains incomplete.
-- Future public tables must explicitly grant only required privileges to `authenticated` and enable appropriate RLS; anon table/sequence privileges are removed by the planned lockdown. Default function EXECUTE privileges are unchanged in this round and remain an optional hardening item.
-- Sale and purchase identifiers are generated in source and constrained by the current single-shop schema; verify uniqueness and retry/concurrency behavior against the deployed database. Per-shop numbering awaits tenant scoping; gap-free guarantees are deferred unless concurrency, rollback, retry, and failure tests prove them.
-- Discount rules to enforce inside the future post_sale RPC: per-role maximum percent, discount never above the bill, never below batch cost (cashier only sees a generic 'Discount not allowed'), discount stored in paisa with the sale, audit_logs entry for discounts above a threshold.
-- Enforce the Rs 200 maximum discount and the role percent caps inside the future post_sale RPC; make the Rs 200 limit editable in Settings.
+- Multi-shop decisions are captured in `docs/MULTI_SHOP_FULL_PLAN.md` and `docs/MASTER_PLAN.md`; they are design references, not authority for unimplemented access paths or database changes.
+- Legacy Supabase schema, migrations, RPCs, and ACLs may differ from checked-in source. No live verification was performed in this work; leave `supabase/` and its migrations untouched until approved cut-over.
+- The Supabase baseline SQL is reconstructed, not a complete dump; timestamped rollback scripts are not forward migrations. Legacy barcode uniqueness, Supabase print/Trash Bin deployments, and physical scanner/printer behavior remain unverified; QR labels and direct ESC/POS support are not implemented.
+- Existing application screens still include mock/in-memory data. Check each active component before assuming persistence; Mongo screen cut-over is incomplete.
+- Mongo API routes and targeted tests exist, but route-wide security hardening, backup/restore proof, production deployment, full screen migration, and manual UI acceptance remain open.
 
 ## Assumptions
 
@@ -147,16 +117,13 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
+- 2026-10-17 — Wired Manage Users CRUD and self-service password change through API adapters, retaining Supabase fallback; focused tests 11/11, full suite 224 passed/0 failed/10 skipped, lint/build passed. Manual browser and Compose route acceptance remain open.
 - 2026-10-17 — Wired personal/admin Print Requests, pending count, submit/decision/edit, and print tracking through typed API adapters in API mode while retaining Supabase fallback. Print adapter 3/3, snapshot 4/4, editor 3/3; lint/build passed. Manual browser and Compose route acceptance remain open.
 - 2026-10-17 — Extended Phase 8 with persisted API Cash Book reads and expense creation, using integer-paisa parsing and exact DTO allowlists; changed cash-book date selection to shop-local calendar bounds. Focused tests passed 4/4 client and 3/3 timezone tests; lint/build passed. Manual UI and Compose route acceptance remain open.
 - 2026-10-17 — Completed the Master Data API adapter batch for authenticated overview, units, name CRUD, and merge flows with strict DTO allowlists. Focused tests: client 3/3 and server catalog 9/9; lint/build passed. This validates local code, not manual UI acceptance or production behavior.
-- 2026-10-15 — Phase 7 implemented Mongo returns, voids, print requests, shop settings, expenses, cash book, sales/stock reports, and live dashboard summary. Targeted Compose replica-set tests passed 9/9 (0 failed/skipped); current root suite passed 184, failed 0, skipped 9. Manual UI acceptance and production verification remain open.
-- 2026-10-15 — Phase 8 wires auth/session, Stock Alerts, Suppliers, POS catalog, server-backed Settings, and POS checkout behind `VITE_BACKEND`; API writes use idempotency keys and the Supabase fallback remains. POS sales/customer adapter tests passed 3/3, POS catalog tests 6/6, server sales tests 9/9, real Mongo suite 10/10, and the full suite 199 passed, 0 failed, 10 Mongo integration skips. Manual UI acceptance remains pending.
-- 2026-10-16 — Phase 8 wires Customer Ledger account loading, customer creation, and cash payment through strict API DTO adapters while preserving Supabase fallback. Focused tests passed 4/4; lint/build passed; full suite passed 203, failed 0, skipped 10. Manual UI acceptance remains pending.
-- 2026-10-16 — Phase 8 wires paginated Sales History through strict API DTO validation, preserves void records but excludes them from sales totals, and retains the Supabase fallback. Focused tests passed 6/6; lint/build passed; full suite passed 206, failed 0, skipped 10. API history is cost-free pending role-filtered reports wiring; manual UI acceptance remains pending.
-- 2026-10-15 — Fixed Mongo app-user authentication in `mongo-init`: app URI uses the app database as `authSource`, root remains on `admin`. Compose initialized indexes, mongo-init exited 0, Mongo/API/web were healthy, and proxied `/api/health` returned 200 without resetting volumes. Real replica-set tests passed 7/7, 0 skips after fixing void Int64 decrement, valid void transaction callbacks, and stock-conflict reply handling. Root lint/build pass; full tests report 184 passed, 0 failed, 7 real-Mongo skips.
-- 2026-10-15 — Phase 6b documents the Compose test runner and aligns expiry/sale calculations to shop-local calendar days; Karachi midnight boundary tests cover 19:00 UTC. The replica-set suite now passes alongside this root suite.
-- 2026-10-14 — Phases 2–6 added Docker/API foundation, Mongo auth and Manage Users, catalog/suppliers, stock/purchases, idempotency, FEFO sales, customer ledger, discount limits, split tender, prescription capture, CSV/barcode support, and the threat/design docs. Earlier local test/runtime status is superseded by the verification recorded above and in `docs/MONGO_MIGRATION.md`.
+- 2026-10-16 — Phase 8 wired Customer Ledger and paginated Sales History through strict DTO adapters with Supabase fallback; focused tests and lint/build passed. Manual UI acceptance remains pending.
+- 2026-10-15 — Phase 7 APIs, earlier Phase 8 modules, Mongo initialization, and shop-timezone boundaries were implemented; historical runtime and test evidence is in `docs/MONGO_MIGRATION.md`.
+- 2026-10-14 — Phases 2–6 built the Docker/API foundation, authentication, catalog/stock/purchase/sales workflows, FEFO, idempotency, and the initial threat/design docs.
 - 2026-10-14 — Phase 0 inventory and the read-only application/database/security audit are documented in `docs/MONGO_MIGRATION_INVENTORY.md` and `docs/audit/`; no live Supabase data or schema was changed.
 - 2026-10-13/12 — Recorded prior POS/FEFO, return-policy, stock-alert, multi-shop, type-safety, barcode/label, print approval, Manage Users, and cost-access/ACL work; live migration/deployment gates remain separate.
 - 2026-10-10 — Added maintained project context, generator, hook setup, and AI working agreements.
@@ -175,15 +142,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-16T20:58:32.887Z
+Generated at (UTC): 2026-10-16T21:29:25.565Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: wire print requests to Mongo API
 - feat: persist Cash Book in Mongo API
 - feat: wire Master Data to Mongo API
 - feat: API proxy and Docker docs cleanup (Phase 0)
 - feat: wire Sales History to Mongo API
-- feat: wire Customer Ledger to Mongo API
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
@@ -212,6 +179,7 @@ npm scripts:
 - - `test:suppliers`: `tsx --test src/data/suppliers.test.ts`
 - - `test:print-snapshot`: `tsx --test src/utils/printSnapshot.test.ts`
 - - `test:print-requests-api`: `tsx --test src/data/printRequests.test.ts`
+- - `test:manage-users-api`: `tsx --test src/data/manageUsers.test.ts`
 - - `test:print-request-editor`: `tsx --test src/utils/printRequestEditor.test.ts`
 - - `test:trash-bin`: `tsx --test src/utils/trashBin.test.ts`
 - - `test:report`: `tsx --test src/utils/salesReport.test.ts`
@@ -222,7 +190,7 @@ npm scripts:
 - - `test:manage-users-policy`: `tsx --test supabase/functions/manage-users/policy.test.ts`
 - - `test:api-client`: `tsx --test src/api/client.test.ts`
 - - `test:server`: `npm --prefix server test`
-- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:finance && npm run test:customer-ledger && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:master-data-api && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-requests-api && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:server`
+- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:finance && npm run test:customer-ledger && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:master-data-api && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-requests-api && npm run test:manage-users-api && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:server`
 
 Dependencies and versions:
 - - `@e965/xlsx` ^0.20.3 (dependency)
@@ -304,6 +272,8 @@ src/
     src/data/customerLedger.test.ts
     src/data/finance.test.ts
     src/data/finance.ts
+    src/data/manageUsers.test.ts
+    src/data/manageUsers.ts
     src/data/masterData.test.ts
     src/data/masterData.ts
     src/data/mockPharmacyData.ts
@@ -381,6 +351,7 @@ Test files:
 - src/components/masterDataSimilarity.test.ts
 - src/data/customerLedger.test.ts
 - src/data/finance.test.ts
+- src/data/manageUsers.test.ts
 - src/data/masterData.test.ts
 - src/data/posCatalogLogic.test.ts
 - src/data/printRequests.test.ts

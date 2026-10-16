@@ -20,7 +20,7 @@ export type ModuleKey = (typeof MODULES)[number]['key'];
 
 export const POS_PRINT_PERMISSION_KEYS = ['pos_print_sale', 'pos_print_payment'] as const;
 export type PosPrintPermissionKey = (typeof POS_PRINT_PERMISSION_KEYS)[number];
-export type PermissionKey = ModuleKey | PosPrintPermissionKey;
+export type PermissionKey = ModuleKey | PosPrintPermissionKey | 'stock_alerts';
 
 export function hasPosPrintToggles(permissions: readonly PermissionKey[]): boolean {
   return permissions.includes('pos');
@@ -100,7 +100,8 @@ export function isModuleKey(value: unknown): value is ModuleKey {
 }
 
 export function isPermissionKey(value: unknown): value is PermissionKey {
-  return isModuleKey(value) || POS_PRINT_PERMISSION_KEYS.some((key) => key === value);
+  return isModuleKey(value) || value === 'stock_alerts'
+    || POS_PRINT_PERMISSION_KEYS.some((key) => key === value);
 }
 
 export function permissionsForRole(role: UserRole, permissions: readonly string[]) {

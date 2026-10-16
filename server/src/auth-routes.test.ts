@@ -195,6 +195,60 @@ test('logout revokes the refresh family and clears the secure cookie', async () 
   }
 });
 
+test('authenticated password change verifies the current password and stores only a new hash', async () => {
+  const { app, client, repository, user } = await setup();
+  try {
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { shopSlug: 'test-shop', usernameOrEmail: 'cashier', password: PASSWORD },
+    });
+    const accessToken = login.json().accessToken as string;
+    const originalHash = user.passwordHash;
+
+    const missingKey = await app.inject({
+      method: 'POST',
+      url: '/api/auth/password',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { currentPassword: PASSWORD, newPassword: 'new-secure-password' },
+    });
+    assert.equal(missingKey.statusCode, 400);
+    assert.deepEqual(missingKey.json(), { error: 'IDEMPOTENCY_KEY_REQUIRED' });
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/api/auth/password',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'idempotency-key': randomUUID(),
+      },
+      payload: { currentPassword: 'incorrect-password', newPassword: 'new-secure-password' },
+    });
+    assert.equal(rejected.statusCode, 403);
+    assert.equal(user.passwordHash, originalHash);
+
+    const changed = await app.inject({
+      method: 'POST',
+      url: '/api/auth/password',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'idempotency-key': randomUUID(),
+      },
+      payload: { currentPassword: PASSWORD, newPassword: 'new-secure-password' },
+    });
+    assert.equal(changed.statusCode, 200);
+    assert.deepEqual(changed.json(), { message: 'Password changed successfully.' });
+    assert.notEqual(user.passwordHash, originalHash);
+    assert.equal(await import('./auth-crypto.js').then(({ verifyPassword }) =>
+      verifyPassword(user.passwordHash, 'new-secure-password')), true);
+    assert.ok(repository.audits.some((entry) => entry.event === 'auth.password_changed'));
+    assert.equal(JSON.stringify(changed.json()).includes('passwordHash'), false);
+  } finally {
+    await app.close();
+    await client.close();
+  }
+});
+
 test('NoSQL operator objects in username or password are rejected by the login schema', async () => {
   const { app, client, repository } = await setup();
   try {

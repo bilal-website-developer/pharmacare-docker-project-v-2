@@ -13,6 +13,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   FORBIDDEN: 'You do not have permission to perform this action.',
   INSUFFICIENT_STOCK: 'There is not enough sellable stock to complete this action.',
   INVALID_CREDENTIALS: 'Invalid sign-in details.',
+  INVALID_CURRENT_PASSWORD: 'The current password is incorrect.',
   NOT_FOUND: 'The requested record could not be found.',
   PAYMENTS_MUST_EQUAL_TOTAL: 'Payment amounts must match the bill total.',
   PRESCRIPTION_REQUIRED: 'Prescription details are required for this medicine.',
@@ -136,7 +137,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   const requestInit: RequestInit = { ...init };
   const method = (requestInit.method ?? 'GET').toUpperCase();
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method)
-    && !path.startsWith('/api/auth/')
+    && !['/api/auth/login', '/api/auth/refresh', '/api/auth/logout'].includes(path)
     && !new Headers(requestInit.headers).has('Idempotency-Key')) {
     const headers = new Headers(requestInit.headers);
     headers.set('Idempotency-Key', globalThis.crypto.randomUUID());

@@ -5,6 +5,7 @@ import {
   canAccessModule,
   canAccessPage,
   hasPosPrintToggles,
+  isPermissionKey,
   MODULES,
   normalizePermissionSelection,
   setModulePermission,
@@ -13,6 +14,7 @@ import {
 } from './permissions';
 
 test('role defaults preserve limited roles and give both admin roles full module access', () => {
+  assert.equal(isPermissionKey('stock_alerts'), true);
   assert.deepEqual(ROLE_DEFAULT_PERMISSIONS[UserRole.CASHIER], ['pos', 'customers']);
   assert.deepEqual(ROLE_DEFAULT_PERMISSIONS[UserRole.MANAGER], [
     'pos', 'products', 'categories', 'suppliers', 'customers',

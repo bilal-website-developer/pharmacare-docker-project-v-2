@@ -26,6 +26,10 @@ const loginSchema = z.object({
   usernameOrEmail: z.string().trim().min(1).max(254),
   password: z.string().min(1).max(1024),
 }).strict();
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(1024),
+  newPassword: z.string().min(8).max(1024),
+}).strict();
 
 const REFRESH_COOKIE = 'pharma_refresh';
 const RATE_WINDOW_MS = 60_000;
@@ -366,6 +370,31 @@ export function registerAuthRoutes(
     }
     clearRefreshCookie(reply);
     return reply.send({ ok: true });
+  });
+
+  app.post('/api/auth/password', {
+    preHandler: requireAuth(repository, tokenConfig, idempotencyStore),
+  }, async (request, reply) => {
+    const user = request.authUser;
+    if (!user) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+    const parsed = changePasswordSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
+    const result = await repository.withShopTransaction(user.shopId, async (transaction) => {
+      const current = await transaction.findUser(user._id);
+      if (!current || !current.isActive || current.deletedAt !== null) return 'not_found' as const;
+      if (!await verifyPassword(current.passwordHash, parsed.data.currentPassword)) return 'invalid_password' as const;
+      const now = new Date();
+      const passwordHash = await hashPassword(parsed.data.newPassword);
+      await transaction.updateUser(current._id, { passwordHash, updatedAt: now });
+      await transaction.writeAudit(auditEvent('auth.password_changed', current, {
+        before: { updatedAt: current.updatedAt.toISOString() },
+        after: { updatedAt: now.toISOString() },
+      }, now));
+      return 'changed' as const;
+    });
+    if (result === 'not_found') return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+    if (result === 'invalid_password') return reply.code(403).send({ error: 'INVALID_CURRENT_PASSWORD' });
+    return reply.send({ message: 'Password changed successfully.' });
   });
 
   app.get('/api/auth/me', {
