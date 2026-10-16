@@ -29,6 +29,19 @@ export interface PurchaseListOptions extends PurchaseHistoryQuery {
   shopId: ObjectId;
 }
 
+export type PurchaseSummaryOptions = Pick<
+  PurchaseListOptions,
+  'shopId' | 'search' | 'paymentType' | 'status' | 'dateFrom' | 'dateTo'
+>;
+
+export interface PurchaseSummary {
+  totalPaisa: string;
+  cashPaisa: string;
+  cashCount: number;
+  creditPaisa: string;
+  creditCount: number;
+}
+
 export interface StockListOptions extends StockBatchQuery {
   shopId: ObjectId;
   canViewCost: boolean;
@@ -79,6 +92,7 @@ export interface StockRepository {
   postPurchase(input: PostPurchaseInput, actor: UserRecord, audit: AuditRecord, today: Date): Promise<PurchaseRecord>;
   voidPurchase(shopId: ObjectId, purchaseId: ObjectId, actor: UserRecord, reason: string, audit: AuditRecord): Promise<PurchaseRecord | null>;
   listPurchases(options: PurchaseListOptions): Promise<{ rows: PurchaseRecord[]; total: number }>;
+  purchaseSummary(options: PurchaseSummaryOptions): Promise<PurchaseSummary>;
   getPurchase(shopId: ObjectId, purchaseId: ObjectId): Promise<PurchaseRecord | null>;
   stockStats(shopId: ObjectId, canViewCost: boolean, today: Date): Promise<StockStats>;
   expiryBuckets(shopId: ObjectId, today: Date): Promise<ExpiryBucket[]>;
@@ -132,6 +146,27 @@ export class MongoStockRepository implements StockRepository {
 
   private purchaseCollection() {
     return this.database.collection<PurchaseRecord>('purchases');
+  }
+
+  private purchaseFilter(options: PurchaseSummaryOptions): Document {
+    const filter: Document = { shopId: options.shopId };
+    if (options.paymentType) filter.paymentType = options.paymentType;
+    if (options.status) filter.status = options.status;
+    if (options.dateFrom || options.dateTo) {
+      filter.purchaseDate = {
+        ...(options.dateFrom ? { $gte: dateOnly(options.dateFrom) } : {}),
+        ...(options.dateTo ? { $lt: addUtcDays(dateOnly(options.dateTo), 1) } : {}),
+      };
+    }
+    if (options.search) {
+      const expression = new RegExp(options.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [
+        { purchaseNumber: expression },
+        { invoiceNumber: expression },
+        { supplierNameSnapshot: expression },
+      ];
+    }
+    return filter;
   }
 
   protected async transactionCheckpoint(_stage: string): Promise<void> {}
@@ -587,23 +622,7 @@ export class MongoStockRepository implements StockRepository {
   }
 
   async listPurchases(options: PurchaseListOptions): Promise<{ rows: PurchaseRecord[]; total: number }> {
-    const filter: Document = { shopId: options.shopId };
-    if (options.paymentType) filter.paymentType = options.paymentType;
-    if (options.status) filter.status = options.status;
-    if (options.dateFrom || options.dateTo) {
-      filter.purchaseDate = {
-        ...(options.dateFrom ? { $gte: dateOnly(options.dateFrom) } : {}),
-        ...(options.dateTo ? { $lte: dateOnly(options.dateTo) } : {}),
-      };
-    }
-    if (options.search) {
-      const expression = new RegExp(options.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      filter.$or = [
-        { purchaseNumber: expression },
-        { invoiceNumber: expression },
-        { supplierNameSnapshot: expression },
-      ];
-    }
+    const filter = this.purchaseFilter(options);
     const collection = this.purchaseCollection();
     const [rows, total] = await Promise.all([
       collection.find(filter).sort({ purchaseDate: -1, _id: -1 })
@@ -611,6 +630,35 @@ export class MongoStockRepository implements StockRepository {
       collection.countDocuments(filter),
     ]);
     return { rows, total };
+  }
+
+  async purchaseSummary(options: PurchaseSummaryOptions): Promise<PurchaseSummary> {
+    const [summary] = await this.purchaseCollection().aggregate<{
+      totalPaisa?: Long;
+      cashPaisa?: Long;
+      cashCount?: number;
+      creditPaisa?: Long;
+      creditCount?: number;
+    }>([
+      { $match: this.purchaseFilter(options) },
+      {
+        $group: {
+          _id: null,
+          totalPaisa: { $sum: '$totalPaisa' },
+          cashPaisa: { $sum: { $cond: [{ $eq: ['$paymentType', 'cash'] }, '$totalPaisa', Long.ZERO] } },
+          cashCount: { $sum: { $cond: [{ $eq: ['$paymentType', 'cash'] }, 1, 0] } },
+          creditPaisa: { $sum: { $cond: [{ $eq: ['$paymentType', 'credit'] }, '$totalPaisa', Long.ZERO] } },
+          creditCount: { $sum: { $cond: [{ $eq: ['$paymentType', 'credit'] }, 1, 0] } },
+        },
+      },
+    ]).toArray();
+    return {
+      totalPaisa: asLong(summary?.totalPaisa ?? Long.ZERO).toString(),
+      cashPaisa: asLong(summary?.cashPaisa ?? Long.ZERO).toString(),
+      cashCount: Number(summary?.cashCount ?? 0),
+      creditPaisa: asLong(summary?.creditPaisa ?? Long.ZERO).toString(),
+      creditCount: Number(summary?.creditCount ?? 0),
+    };
   }
 
   getPurchase(shopId: ObjectId, purchaseId: ObjectId): Promise<PurchaseRecord | null> {

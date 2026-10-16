@@ -76,7 +76,11 @@ function roleCostView(user: UserRecord): boolean {
   return canViewCost(user.role, user.permissions);
 }
 
-function purchaseListDto(purchase: PurchaseRecord, showCost: boolean): Record<string, unknown> {
+function purchaseListDto(
+  purchase: PurchaseRecord,
+  showCost: boolean,
+  createdByName: string,
+): Record<string, unknown> {
   return {
     id: purchase._id.toHexString(),
     purchaseNumber: purchase.purchaseNumber,
@@ -87,6 +91,7 @@ function purchaseListDto(purchase: PurchaseRecord, showCost: boolean): Record<st
     status: purchase.status,
     paymentType: purchase.paymentType,
     itemCount: purchase.items.length,
+    createdByName,
     ...(showCost ? {
       subtotalPaisa: purchase.subtotalPaisa.toString(),
       discountPaisa: purchase.discountPaisa.toString(),
@@ -97,11 +102,14 @@ function purchaseListDto(purchase: PurchaseRecord, showCost: boolean): Record<st
   };
 }
 
-function purchaseDetailDto(purchase: PurchaseRecord, showCost: boolean): Record<string, unknown> {
+function purchaseDetailDto(
+  purchase: PurchaseRecord,
+  showCost: boolean,
+  createdByName: string,
+): Record<string, unknown> {
   return {
-    ...purchaseListDto(purchase, showCost),
+    ...purchaseListDto(purchase, showCost, createdByName),
     notes: purchase.notes,
-    createdBy: purchase.createdBy.toHexString(),
     ...(purchase.voidReason ? { voidReason: purchase.voidReason } : {}),
     ...(purchase.voidedAt ? { voidedAt: purchase.voidedAt.toISOString() } : {}),
     items: purchase.items.map((item) => ({
@@ -111,6 +119,7 @@ function purchaseDetailDto(purchase: PurchaseRecord, showCost: boolean): Record<
       medicineCode: item.medicineCodeSnapshot,
       unitId: item.unitId.toHexString(),
       unitName: item.unitNameSnapshot,
+      conversionFactorBaseUnits: item.conversionFactorBaseUnits,
       quantity: item.quantityInUnits,
       bonusQuantityBaseUnits: item.bonusQuantityBaseUnits.toString(),
       quantityReceivedBaseUnits: item.quantityReceivedBaseUnits.toString(),
@@ -231,6 +240,8 @@ export function registerStockRoutes(
   app.get('/api/purchases/catalog', { preHandler: purchasePreHandler }, async (request, reply) => {
     const caller = callerFor(request, reply);
     if (!caller) return;
+    const today = await todayForShop(request, reply, authRepository, caller);
+    if (!today) return;
     const showCost = roleCostView(caller);
     const catalog = await repository.activePurchaseCatalog(caller.shopId, showCost);
     const items = catalog.items.map((record) => ({
@@ -246,7 +257,7 @@ export function registerStockRoutes(
         ? { lastCostPaisaPerBaseUnit: record.lastCostPaisaPerBaseUnit }
         : {}),
     }));
-    return reply.send({ items, suppliers: catalog.suppliers });
+    return reply.send({ items, suppliers: catalog.suppliers, today: today.toISOString().slice(0, 10) });
   });
 
   app.get('/api/purchases/history', { preHandler: historyPreHandler }, async (request, reply) => {
@@ -255,12 +266,61 @@ export function registerStockRoutes(
     const parsed = purchaseHistoryQuerySchema.safeParse(request.query);
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
     const result = await repository.listPurchases({ ...parsed.data, shopId: caller.shopId });
+    const summary = roleCostView(caller)
+      ? await repository.purchaseSummary({ ...parsed.data, shopId: caller.shopId })
+      : null;
+    const users = await authRepository.listUsers(caller.shopId, true);
+    const namesById = new Map(users.map((user) => [user._id.toHexString(), user.fullName || user.username]));
     const showCost = roleCostView(caller);
     return reply.send({
-      items: result.rows.map((purchase) => purchaseListDto(purchase, showCost)),
+      items: result.rows.map((purchase) => purchaseListDto(
+        purchase,
+        showCost,
+        namesById.get(purchase.createdBy.toHexString()) ?? 'Unknown',
+      )),
       total: result.total,
       page: parsed.data.page,
       pageSize: parsed.data.pageSize,
+      ...(summary ? { summary } : {}),
+    });
+  });
+
+  app.get('/api/purchases/export', { preHandler: historyPreHandler }, async (request, reply) => {
+    const caller = callerFor(request, reply);
+    if (!caller) return;
+    if (!roleCostView(caller)) return reply.code(403).send({ error: 'FORBIDDEN' });
+    const parsed = purchaseHistoryQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
+    const pageSize = 200;
+    const firstPage = await repository.listPurchases({
+      ...parsed.data,
+      shopId: caller.shopId,
+      page: 1,
+      pageSize,
+    });
+    if (firstPage.total > 100_000) return reply.code(413).send({ error: 'EXPORT_LIMIT_EXCEEDED' });
+    const purchases = [...firstPage.rows];
+    for (let page = 2; purchases.length < firstPage.total; page += 1) {
+      const result = await repository.listPurchases({
+        ...parsed.data,
+        shopId: caller.shopId,
+        page,
+        pageSize,
+      });
+      if (result.rows.length === 0) break;
+      purchases.push(...result.rows);
+    }
+    if (purchases.length !== firstPage.total) {
+      throw new Error('PURCHASE_EXPORT_INCOMPLETE');
+    }
+    const users = await authRepository.listUsers(caller.shopId, true);
+    const namesById = new Map(users.map((user) => [user._id.toHexString(), user.fullName || user.username]));
+    return reply.send({
+      items: purchases.map((purchase) => purchaseDetailDto(
+        purchase,
+        true,
+        namesById.get(purchase.createdBy.toHexString()) ?? 'Unknown',
+      )),
     });
   });
 
@@ -271,7 +331,11 @@ export function registerStockRoutes(
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
     const purchase = await repository.getPurchase(caller.shopId, objectId(parsed.data));
     if (!purchase) return reply.code(404).send({ error: 'NOT_FOUND' });
-    return reply.send(purchaseDetailDto(purchase, roleCostView(caller)));
+    const createdBy = await authRepository.findUserById(purchase.createdBy);
+    const createdByName = createdBy?.shopId.equals(caller.shopId)
+      ? createdBy.fullName || createdBy.username
+      : 'Unknown';
+    return reply.send(purchaseDetailDto(purchase, roleCostView(caller), createdByName));
   });
 
   app.post('/api/purchases', { preHandler: purchasePreHandler }, async (request, reply) => {
@@ -289,7 +353,7 @@ export function registerStockRoutes(
         audit(caller, 'purchase.posted', 'purchase'),
         today,
       );
-      return reply.code(201).send(purchaseDetailDto(purchase, true));
+      return reply.code(201).send(purchaseDetailDto(purchase, true, caller.fullName || caller.username));
     } catch (error) {
       const response = failureResponse(error, reply);
       if (response) return response;
@@ -318,7 +382,11 @@ export function registerStockRoutes(
         audit(caller, 'purchase.voided', 'purchase', objectId(idParsed.data)),
       );
       if (!purchase) return reply.code(404).send({ error: 'NOT_FOUND' });
-      return reply.send(purchaseDetailDto(purchase, roleCostView(caller)));
+      const createdBy = await authRepository.findUserById(purchase.createdBy);
+      const createdByName = createdBy?.shopId.equals(caller.shopId)
+        ? createdBy.fullName || createdBy.username
+        : 'Unknown';
+      return reply.send(purchaseDetailDto(purchase, roleCostView(caller), createdByName));
     } catch (error) {
       const response = failureResponse(error, reply);
       if (response) return response;

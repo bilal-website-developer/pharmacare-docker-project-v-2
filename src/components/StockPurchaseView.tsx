@@ -2,35 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight, Minus, Pause, Play, Plus, RefreshCw, Search, Trash2, X,
 } from 'lucide-react';
+import { getBackend } from '../api/config';
 import { usePermissions } from '../permissions';
 import { getSupabaseErrorMessage } from '../utils/supabaseError';
 import { supabase } from '../utils/supabase';
 import { dispatchStockChanged } from '../utils/stockAlertsEvents';
+import { loadPurchaseCatalog, postPurchase } from '../data/purchases';
+import type { PurchaseCatalogProduct, PurchaseCatalogUnit, PurchaseSupplier } from '../data/purchases';
 
-interface PurchaseUnit {
-  id: string;
-  name: string;
-  conversion_factor: number;
-  is_default_sale_unit: boolean;
-  price_paisa: number;
-}
-
-interface PurchaseProduct {
-  id: string;
-  code: string;
-  barcode: string | null;
-  brand_name: string;
-  generic_name: string;
-  company: string;
-  stock: number;
-  last_cost_base_paisa: number | null;
-  units: PurchaseUnit[];
-}
-
-interface Supplier {
-  id: string;
-  name: string;
-}
+type PurchaseUnit = PurchaseCatalogUnit;
+type PurchaseProduct = PurchaseCatalogProduct;
+type Supplier = PurchaseSupplier;
 
 interface CartLine {
   product: PurchaseProduct;
@@ -53,12 +35,6 @@ interface PurchaseDraft {
   discount: string;
   notes: string;
   lines: CartLine[];
-}
-
-interface PostedPurchase {
-  id: string;
-  pr_no: string;
-  total_paisa: number;
 }
 
 const localDate = () => {
@@ -120,6 +96,7 @@ export function StockPurchaseView({
   const [paymentType, setPaymentType] = useState<'cash' | 'credit'>('cash');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(localDate);
+  const [today, setToday] = useState(localDate);
   const [discount, setDiscount] = useState('0.00');
   const [notes, setNotes] = useState('');
   const [search, setSearch] = useState('');
@@ -132,6 +109,23 @@ export function StockPurchaseView({
   const [notice, setNotice] = useState<{ text: string; error: boolean; viewHistory?: boolean } | null>(null);
 
   const refreshProducts = useCallback(async (): Promise<string | null> => {
+    if (getBackend() === 'api') {
+      setLoading(true);
+      try {
+        const catalog = await loadPurchaseCatalog();
+        setProducts(catalog.products);
+        setSuppliers(catalog.suppliers);
+        setToday(catalog.today);
+        setPurchaseDate((current) => current === localDate() ? catalog.today : current);
+        return null;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Could not load products and suppliers.';
+        setNotice({ text: message, error: true });
+        return message;
+      } finally {
+        setLoading(false);
+      }
+    }
     if (!supabase) {
       setNotice({ text: 'Supabase is not configured.', error: true });
       setLoading(false);
@@ -147,6 +141,7 @@ export function StockPurchaseView({
       if (supplierError) throw supplierError;
       setProducts((catalog ?? []) as PurchaseProduct[]);
       setSuppliers((supplierRows ?? []) as Supplier[]);
+      setToday(localDate());
       return null;
     } catch (error) {
       const message = getSupabaseErrorMessage(error, 'Could not load products and suppliers.');
@@ -249,7 +244,7 @@ export function StockPurchaseView({
     setSupplierId('');
     setPaymentType('cash');
     setInvoiceNumber('');
-    setPurchaseDate(localDate());
+    setPurchaseDate(today);
     setDiscount('0.00');
     setNotes('');
   };
@@ -269,7 +264,7 @@ export function StockPurchaseView({
   const savePurchase = async () => {
     if (!supplierId) return setNotice({ text: 'Select a supplier.', error: true });
     if (!cart.length) return setNotice({ text: 'Add at least one item to the cart.', error: true });
-    if (!purchaseDate || purchaseDate > localDate()) return setNotice({ text: 'Enter a valid purchase date.', error: true });
+    if (!purchaseDate || purchaseDate > today) return setNotice({ text: 'Enter a valid purchase date.', error: true });
     if (discountPaisa === null || discountPaisa < 0) return setNotice({ text: 'Enter a valid non-negative discount.', error: true });
     if (discountPaisa > subtotal) return setNotice({ text: 'Discount cannot be greater than the subtotal.', error: true });
     for (const line of cart) {
@@ -277,47 +272,72 @@ export function StockPurchaseView({
       const mrp = parsePaisa(line.mrp);
       if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0 || line.quantity > 2147483647) return setNotice({ text: `Enter a valid quantity for ${line.product.brand_name}.`, error: true });
       if (!line.batchNumber.trim()) return setNotice({ text: `Enter a batch number for ${line.product.brand_name}.`, error: true });
-      if (!line.expiryDate || line.expiryDate <= localDate() || line.expiryDate <= purchaseDate) return setNotice({ text: `Enter a future expiry date for ${line.product.brand_name}.`, error: true });
-      if (rate === null || rate < 0 || rate > 2147483647) return setNotice({ text: `Enter a valid cost rate for ${line.product.brand_name}.`, error: true });
-      if (mrp === null || mrp < 0 || mrp > 2147483647) return setNotice({ text: `Enter a valid MRP for ${line.product.brand_name}.`, error: true });
+      if (!line.expiryDate || line.expiryDate <= today || line.expiryDate <= purchaseDate) return setNotice({ text: `Enter a future expiry date for ${line.product.brand_name}.`, error: true });
+      if (rate === null || rate < 0 || (getBackend() === 'supabase' && rate > 2147483647)) return setNotice({ text: `Enter a valid cost rate for ${line.product.brand_name}.`, error: true });
+      if (mrp === null || mrp < 0 || (getBackend() === 'supabase' && mrp > 2147483647)) return setNotice({ text: `Enter a valid MRP for ${line.product.brand_name}.`, error: true });
       if (!Number.isSafeInteger(line.bonusQty) || line.bonusQty < 0 || line.bonusQty > 2147483647) return setNotice({ text: `Enter a valid bonus quantity for ${line.product.brand_name}.`, error: true });
     }
-    if (!Number.isSafeInteger(subtotal) || subtotal > 2147483647) return setNotice({ text: 'Purchase subtotal exceeds the supported limit.', error: true });
-    if (discountPaisa > 2147483647) return setNotice({ text: 'Discount exceeds the supported limit.', error: true });
-    if (!supabase) return setNotice({ text: 'Supabase is not configured.', error: true });
+    if (!Number.isSafeInteger(subtotal) || (getBackend() === 'supabase' && subtotal > 2147483647)) return setNotice({ text: 'Purchase subtotal exceeds the supported limit.', error: true });
+    if (getBackend() === 'supabase' && discountPaisa > 2147483647) return setNotice({ text: 'Discount exceeds the supported limit.', error: true });
+    if (getBackend() === 'supabase' && !supabase) return setNotice({ text: 'Supabase is not configured.', error: true });
 
     setSaving(true);
     setNotice(null);
     try {
-      const { data, error } = await supabase.rpc('post_purchase', {
-        p_supplier_id: supplierId,
-        p_invoice_number: invoiceNumber.trim() || null,
-        p_purchase_date: purchaseDate,
-        p_paid_paisa: paymentType === 'cash' ? total : 0,
-        p_notes: notes.trim() || null,
-        p_discount_paisa: discountPaisa,
-        p_payment_type: paymentType,
-        p_items: cart.map((line) => ({
-          medicine_id: line.product.id,
-          unit_id: line.unitId,
-          batch_number: line.batchNumber.trim(),
-          expiry_date: line.expiryDate,
-          quantity: line.quantity,
-          bonus_qty: line.bonusQty,
-          unit_cost_paisa: parsePaisa(line.rate),
-          mrp_paisa: parsePaisa(line.mrp),
-        })),
-      });
-      if (error) throw error;
+      let posted: { id: string; pr_no: string; total_paisa: number };
+      if (getBackend() === 'api') {
+        posted = await postPurchase({
+          supplierId,
+          invoiceNumber: invoiceNumber.trim(),
+          purchaseDate,
+          paymentType,
+          discountPaisa: String(discountPaisa),
+          notes: notes.trim(),
+          items: cart.map((line) => ({
+            medicineId: line.product.id,
+            unitId: line.unitId,
+            batchNumber: line.batchNumber.trim(),
+            expiryDate: line.expiryDate,
+            quantity: line.quantity,
+            bonusQuantity: line.bonusQty,
+            unitCostPaisa: String(parsePaisa(line.rate)),
+            mrpPaisa: String(parsePaisa(line.mrp)),
+          })),
+        });
+      } else {
+        const { data, error } = await supabase!.rpc('post_purchase', {
+          p_supplier_id: supplierId,
+          p_invoice_number: invoiceNumber.trim() || null,
+          p_purchase_date: purchaseDate,
+          p_paid_paisa: paymentType === 'cash' ? total : 0,
+          p_notes: notes.trim() || null,
+          p_discount_paisa: discountPaisa,
+          p_payment_type: paymentType,
+          p_items: cart.map((line) => ({
+            medicine_id: line.product.id,
+            unit_id: line.unitId,
+            batch_number: line.batchNumber.trim(),
+            expiry_date: line.expiryDate,
+            quantity: line.quantity,
+            bonus_qty: line.bonusQty,
+            unit_cost_paisa: parsePaisa(line.rate),
+            mrp_paisa: parsePaisa(line.mrp),
+          })),
+        });
+        if (error) throw error;
+        posted = data as { id: string; pr_no: string; total_paisa: number };
+      }
       dispatchStockChanged();
-      const posted = data as PostedPurchase;
       clearForm();
       const refreshError = await refreshProducts();
       setNotice(refreshError
         ? { text: `${posted.pr_no} was saved, but product stock could not be refreshed: ${refreshError}`, error: true, viewHistory: true }
         : { text: `${posted.pr_no} saved successfully.`, error: false, viewHistory: true });
     } catch (error) {
-      setNotice({ text: getSupabaseErrorMessage(error, 'Purchase could not be saved. Your cart has been kept.'), error: true });
+      const message = getBackend() === 'api' && error instanceof Error
+        ? error.message
+        : getSupabaseErrorMessage(error, 'Purchase could not be saved. Your cart has been kept.');
+      setNotice({ text: message, error: true });
     } finally {
       setSaving(false);
     }
@@ -436,7 +456,7 @@ export function StockPurchaseView({
                       <input value={line.batchNumber} onChange={(event) => patchLine(index, { batchNumber: event.target.value })} className="mt-1 w-full rounded-control border border-border bg-white px-2 py-1.5 text-xs" />
                     </label>
                     <label className="text-[11px] font-semibold text-text">Expiry Date *
-                      <input type="date" min={localDate()} value={line.expiryDate} onChange={(event) => patchLine(index, { expiryDate: event.target.value })} className="mt-1 w-full rounded-control border border-border bg-white px-2 py-1.5 text-xs" />
+                      <input type="date" min={today} value={line.expiryDate} onChange={(event) => patchLine(index, { expiryDate: event.target.value })} className="mt-1 w-full rounded-control border border-border bg-white px-2 py-1.5 text-xs" />
                     </label>
                     <label className="text-[11px] font-semibold text-text">Bonus / Free Qty
                       <input type="number" min="0" step="1" value={line.bonusQty} onChange={(event) => patchLine(index, { bonusQty: event.target.value === '' ? 0 : Number(event.target.value) })} className="mt-1 w-full rounded-control border border-border bg-white px-2 py-1.5 text-xs" />

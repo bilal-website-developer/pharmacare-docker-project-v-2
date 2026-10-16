@@ -303,6 +303,94 @@ test('cashier receives no cost values in purchase or stock DTOs even with explic
   }
 });
 
+test('purchase history summaries span all filtered pages and export returns complete cost-gated details', async () => {
+  const { app, client, manager, cashier, stock, supplierId, medicine } = await setup();
+  try {
+    const cashPurchase = await app.inject({
+      method: 'POST',
+      url: '/api/purchases',
+      headers: headers(manager),
+      payload: purchaseBody(supplierId, medicine.medicineId, medicine.unitId, {
+        paymentType: 'cash',
+        items: [{
+          medicineId: medicine.medicineId.toHexString(),
+          unitId: medicine.unitId.toHexString(),
+          batchNumber: 'BATCH-CASH',
+          expiryDate: dateFromToday(120),
+          quantity: 2,
+          bonusQuantity: 1,
+          unitCostPaisa: '101',
+          mrpPaisa: '150',
+        }],
+      }),
+    });
+    const creditPurchase = await app.inject({
+      method: 'POST',
+      url: '/api/purchases',
+      headers: headers(manager),
+      payload: purchaseBody(supplierId, medicine.medicineId, medicine.unitId, {
+        items: [{
+          medicineId: medicine.medicineId.toHexString(),
+          unitId: medicine.unitId.toHexString(),
+          batchNumber: 'BATCH-CREDIT',
+          expiryDate: dateFromToday(150),
+          quantity: 2,
+          bonusQuantity: 1,
+          unitCostPaisa: '101',
+          mrpPaisa: '150',
+        }],
+      }),
+    });
+    assert.equal(cashPurchase.statusCode, 201);
+    assert.equal(creditPurchase.statusCode, 201);
+
+    const history = await app.inject({
+      method: 'GET',
+      url: '/api/purchases/history?page=1&pageSize=1',
+      headers: headers(manager),
+    });
+    assert.equal(history.statusCode, 200);
+    assert.deepEqual(history.json().summary, {
+      totalPaisa: '400',
+      cashPaisa: '200',
+      cashCount: 1,
+      creditPaisa: '200',
+      creditCount: 1,
+    });
+    assert.equal(history.json().items.length, 1);
+    assert.equal(typeof history.json().items[0].createdByName, 'string');
+
+    const exported = await app.inject({
+      method: 'GET',
+      url: '/api/purchases/export',
+      headers: headers(manager),
+    });
+    assert.equal(exported.statusCode, 200);
+    assert.equal(exported.json().items.length, 2);
+    assert.equal(exported.json().items[0].items.length, 1);
+    assert.equal(typeof exported.json().items[0].items[0].unitCostPaisa, 'string');
+
+    const deniedExport = await app.inject({
+      method: 'GET',
+      url: '/api/purchases/export',
+      headers: headers(cashier),
+    });
+    assert.equal(deniedExport.statusCode, 403);
+    const cashierHistory = await app.inject({
+      method: 'GET',
+      url: '/api/purchases/history',
+      headers: headers(cashier),
+    });
+    assert.equal(cashierHistory.statusCode, 200);
+    assert.equal('summary' in cashierHistory.json(), false);
+    assert.equal(JSON.stringify(cashierHistory.json()).toLowerCase().includes('paisa'), false);
+    assert.equal(stock.purchases.length, 2);
+  } finally {
+    await app.close();
+    await client.close();
+  }
+});
+
 test('purchase and stock APIs enforce permission and cost-gated mutation policy', async () => {
   const { app, client, accountant, cashier, manager, supplierId, medicine } = await setup();
   try {

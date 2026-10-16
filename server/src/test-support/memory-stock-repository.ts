@@ -18,6 +18,8 @@ import {
 import type {
   ExpiryBucket,
   PurchaseListOptions,
+  PurchaseSummary,
+  PurchaseSummaryOptions,
   StockListOptions,
   StockLogOptions,
   StockRepository,
@@ -381,6 +383,32 @@ export class MemoryStockRepository implements StockRepository {
     ).sort((left, right) => right.purchaseDate.getTime() - left.purchaseDate.getTime()
       || right._id.toHexString().localeCompare(left._id.toHexString()));
     return { rows: withinPage(rows, options.page, options.pageSize), total: rows.length };
+  }
+
+  async purchaseSummary(options: PurchaseSummaryOptions): Promise<PurchaseSummary> {
+    const search = options.search?.toLocaleLowerCase('en-US');
+    const rows = [...this.state.purchases.values()].filter((purchase) =>
+      purchase.shopId.equals(options.shopId)
+      && (!options.paymentType || purchase.paymentType === options.paymentType)
+      && (!options.status || purchase.status === options.status)
+      && (!options.dateFrom || purchase.purchaseDate >= dateOnly(options.dateFrom))
+      && (!options.dateTo || purchase.purchaseDate < addUtcDays(dateOnly(options.dateTo), 1))
+      && (!search || `${purchase.purchaseNumber} ${purchase.invoiceNumber} ${purchase.supplierNameSnapshot}`
+        .toLocaleLowerCase('en-US').includes(search)),
+    );
+    const cash = rows.filter((purchase) => purchase.paymentType === 'cash');
+    const credit = rows.filter((purchase) => purchase.paymentType === 'credit');
+    const sum = (items: PurchaseRecord[]) => items.reduce(
+      (total, purchase) => total + BigInt(purchase.totalPaisa.toString()),
+      0n,
+    ).toString();
+    return {
+      totalPaisa: sum(rows),
+      cashPaisa: sum(cash),
+      cashCount: cash.length,
+      creditPaisa: sum(credit),
+      creditCount: credit.length,
+    };
   }
 
   async getPurchase(shopId: ObjectId, purchaseId: ObjectId): Promise<PurchaseRecord | null> {

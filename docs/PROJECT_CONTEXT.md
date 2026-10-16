@@ -6,7 +6,7 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phases 0–7 have server-side implementation; Phase 8 has API wiring for auth/session, Stock Alerts, Suppliers, POS catalog/settings/sales, Customer Ledger, Sales History, Master Data, Cash Book/expenses, Print Requests, Manage Users, and Returns. Remaining screen cut-over, manual UI acceptance, and production verification are open.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phases 0–7 have server-side implementation; Phase 8 has API wiring for auth/session, Stock Alerts, Suppliers, POS catalog/settings/sales, Customer Ledger, Sales History, Master Data, Cash Book/expenses, Print Requests, Manage Users, Returns, Purchases, and Purchase History. Remaining screen cut-over, manual UI acceptance, and production verification are open.
 
 - Latest modules: Manage Users and Returns use authenticated API routes with strict DTO validation; Supabase fallback remains available when `VITE_BACKEND=supabase`.
 - Step 0 housekeeping: fixed the Vite proxy target to the Docker API default (`:3000`), kept a `VITE_API_PROXY_TARGET` override for direct host-mode Fastify dev on `:3001`, and documented the intended Docker vs. host API port split.
@@ -51,7 +51,7 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - Supabase Auth/Postgres: shared across clients connected to the same configured project. Products, Stock Inventory, and purchase workflows use server RPCs; Suppliers still has direct table reads/writes. Authorization and persistence are not uniform across every screen.
 - Supabase Edge Functions: the `manage-users` function exists; print approval, requester-name listing, audited receipt-only modification, and profile Trash Bin events use database RPCs/Edge Functions.
 - Browser `localStorage`: per-browser/device preferences, saved inventory views, purchase drafts, receipt settings, per-user stock-alert keys seen, and other UI settings. These do not synchronize across counters.
-- Mixed persistence: `VITE_BACKEND=supabase` retains the legacy Supabase behavior. API-mode adapters cover auth/session, Stock Alerts, Suppliers, POS catalog, Settings, Sales/POS/Customer Ledger/Sales History, Master Data, Cash Book/expenses, Print Requests, Manage Users, and Returns; remaining screens still need migration. Production and manual UI behavior remain unverified.
+- Mixed persistence: `VITE_BACKEND=supabase` retains the legacy Supabase behavior. API-mode adapters cover auth/session, Stock Alerts, Suppliers, POS catalog, Settings, Sales/POS/Customer Ledger/Sales History, Master Data, Cash Book/expenses, Print Requests, Manage Users, Returns, Purchases, and Purchase History; remaining screens still need migration. Production and manual UI behavior remain unverified.
 - Other storage: unknown; no general file/object-storage workflow is established by the checked-in frontend docs.
 - Shared production data behavior depends on Supabase deployment and the live schema, which may differ from checked-in migrations.
 - The local Docker stack contains authenticated MongoDB on a private network and a Fastify API with health, auth, Manage Users, catalog, purchase, stock, sales, and Phase 7 routes. Local Compose startup, Mongo initialization/index creation, service health checks, `/api/health` proxy, and the targeted real-Mongo integration suite have passed. This is not production or manual UI acceptance. Legacy Supabase paths remain available.
@@ -118,16 +118,15 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 ## Changelog
 
 - 2026-10-17 — Wired Returns search/request/review/process through strict Mongo API adapters, returning shop-local date and no-cost DTOs; focused tests 3/3, full suite 227 passed/0 failed/10 skipped, lint/build passed. Manual UI and Compose acceptance remain open.
+- 2026-10-17 — Wired purchase entry/history, details, void and filtered export through strict Mongo DTO adapters; purchase tests 5/5, stock API tests 14/14, full suite 233 passed/0 failed/10 skipped, lint/build passed. Manual UI and Compose acceptance remain open.
 - 2026-10-17 — Wired Manage Users CRUD and self-service password change through API adapters, retaining Supabase fallback; focused tests 11/11, full suite 224 passed/0 failed/10 skipped, lint/build passed. Manual browser and Compose route acceptance remain open.
 - 2026-10-17 — Wired personal/admin Print Requests, pending count, submit/decision/edit, and print tracking through typed API adapters in API mode while retaining Supabase fallback. Print adapter 3/3, snapshot 4/4, editor 3/3; lint/build passed. Manual browser and Compose route acceptance remain open.
 - 2026-10-17 — Extended Phase 8 with persisted API Cash Book reads and expense creation, using integer-paisa parsing and exact DTO allowlists; changed cash-book date selection to shop-local calendar bounds. Focused tests passed 4/4 client and 3/3 timezone tests; lint/build passed. Manual UI and Compose route acceptance remain open.
 - 2026-10-17 — Completed the Master Data API adapter batch for authenticated overview, units, name CRUD, and merge flows with strict DTO allowlists. Focused tests: client 3/3 and server catalog 9/9; lint/build passed. This validates local code, not manual UI acceptance or production behavior.
 - 2026-10-16 — Phase 8 wired Customer Ledger and paginated Sales History through strict DTO adapters with Supabase fallback; focused tests and lint/build passed. Manual UI acceptance remains pending.
 - 2026-10-15 — Phase 7 APIs, earlier Phase 8 modules, Mongo initialization, and shop-timezone boundaries were implemented; historical runtime and test evidence is in `docs/MONGO_MIGRATION.md`.
-- 2026-10-14 — Phases 2–6 built the Docker/API foundation, authentication, catalog/stock/purchase/sales workflows, FEFO, idempotency, and the initial threat/design docs.
-- 2026-10-14 — Phase 0 inventory and the read-only application/database/security audit are documented in `docs/MONGO_MIGRATION_INVENTORY.md` and `docs/audit/`; no live Supabase data or schema was changed.
-- 2026-10-13/12 — Recorded prior POS/FEFO, return-policy, stock-alert, multi-shop, type-safety, barcode/label, print approval, Manage Users, and cost-access/ACL work; live migration/deployment gates remain separate.
-- 2026-10-10 — Added maintained project context, generator, hook setup, and AI working agreements.
+- 2026-10-14 — Phases 0–6 delivered the inventory/design docs, Docker/API foundation, authentication, catalog/stock/purchase/sales workflows, FEFO, idempotency, and source-only security audit; no live Supabase data or schema was changed.
+- 2026-10-13–10 — Recorded prior POS/FEFO, returns, stock alerts, multi-shop, barcode/labels, print approvals, Manage Users, cost-access/ACL work, and context tooling; live migration/deployment gates remain separate.
 
 History: Earlier work delivered Products and Master Data redesigns, Pharmacy Memo rendering and print approvals, role/permission UI, and Stock Inventory. See `docs/REDESIGN_PROGRESS.md` and recent Git history for details; that progress document contains some status entries older than the current source.
 
@@ -143,15 +142,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-16T21:48:27.414Z
+Generated at (UTC): 2026-10-16T22:24:57.857Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: wire returns workflow to Mongo API
 - docs: refresh project context after Manage Users
 - feat: wire Manage Users to Mongo API
 - feat: wire print requests to Mongo API
 - feat: persist Cash Book in Mongo API
-- feat: wire Master Data to Mongo API
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
@@ -182,6 +181,7 @@ npm scripts:
 - - `test:print-requests-api`: `tsx --test src/data/printRequests.test.ts`
 - - `test:manage-users-api`: `tsx --test src/data/manageUsers.test.ts`
 - - `test:sale-returns-api`: `tsx --test src/data/saleReturns.test.ts`
+- - `test:purchases-api`: `tsx --test src/data/purchases.test.ts`
 - - `test:print-request-editor`: `tsx --test src/utils/printRequestEditor.test.ts`
 - - `test:trash-bin`: `tsx --test src/utils/trashBin.test.ts`
 - - `test:report`: `tsx --test src/utils/salesReport.test.ts`
@@ -192,7 +192,7 @@ npm scripts:
 - - `test:manage-users-policy`: `tsx --test supabase/functions/manage-users/policy.test.ts`
 - - `test:api-client`: `tsx --test src/api/client.test.ts`
 - - `test:server`: `npm --prefix server test`
-- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:finance && npm run test:customer-ledger && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:master-data-api && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-requests-api && npm run test:manage-users-api && npm run test:sale-returns-api && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:server`
+- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:finance && npm run test:customer-ledger && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:master-data-api && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-requests-api && npm run test:manage-users-api && npm run test:sale-returns-api && npm run test:purchases-api && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:server`
 
 Dependencies and versions:
 - - `@e965/xlsx` ^0.20.3 (dependency)
@@ -284,6 +284,8 @@ src/
     src/data/posCatalogLogic.ts
     src/data/printRequests.test.ts
     src/data/printRequests.ts
+    src/data/purchases.test.ts
+    src/data/purchases.ts
     src/data/returnLogic.test.ts
     src/data/returnLogic.ts
     src/data/saleReturns.test.ts
@@ -358,6 +360,7 @@ Test files:
 - src/data/masterData.test.ts
 - src/data/posCatalogLogic.test.ts
 - src/data/printRequests.test.ts
+- src/data/purchases.test.ts
 - src/data/returnLogic.test.ts
 - src/data/saleReturns.test.ts
 - src/data/sales.test.ts
