@@ -158,7 +158,7 @@ export interface ControlledDrugLog {
 export interface CashTransaction {
   id: string;
   time: string;
-  type: 'SALE' | 'CREDIT_RECOVERY' | 'EXPENSE' | 'OPENING_FLOAT';
+  type: 'SALE' | 'CREDIT_RECOVERY' | 'EXPENSE' | 'OPENING_FLOAT' | 'RETURN' | 'SALE_VOID' | 'ADJUSTMENT';
   description: string;
   amountPaisa: number;
   isOutflow: boolean;

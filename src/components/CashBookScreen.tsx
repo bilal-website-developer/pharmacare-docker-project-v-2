@@ -8,10 +8,11 @@ import {
   Lock,
 } from 'lucide-react';
 import { CashTransaction } from '../types/pharmacy';
+import { parsePaisaInput } from '../data/finance';
 
 interface CashBookScreenProps {
   transactions: CashTransaction[];
-  onAddTransaction: (tx: CashTransaction) => void;
+  onAddTransaction: (tx: CashTransaction) => void | Promise<void>;
 }
 
 export const CashBookScreen: React.FC<CashBookScreenProps> = ({
@@ -20,10 +21,11 @@ export const CashBookScreen: React.FC<CashBookScreenProps> = ({
 }) => {
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [expenseDesc, setExpenseDesc] = useState('');
-  const [expenseAmountPKR, setExpenseAmountPKR] = useState<number>(0);
+  const [expenseAmountPKR, setExpenseAmountPKR] = useState('');
+  const [expenseError, setExpenseError] = useState('');
 
   // Shift closing drawer count
-  const [actualDrawerCashPKR, setActualDrawerCashPKR] = useState<number>(0);
+  const [actualDrawerCashPKR, setActualDrawerCashPKR] = useState('');
   const [shiftClosed, setShiftClosed] = useState(false);
 
   const totalInflowsPaisa = useMemo(() => {
@@ -39,27 +41,36 @@ export const CashBookScreen: React.FC<CashBookScreenProps> = ({
   }, [transactions]);
 
   const expectedDrawerPaisa = totalInflowsPaisa - totalOutflowsPaisa;
-  const actualDrawerPaisa = actualDrawerCashPKR * 100;
+  const actualDrawerPaisa = parsePaisaInput(actualDrawerCashPKR) ?? 0;
   const discrepancyPaisa = actualDrawerPaisa - expectedDrawerPaisa;
 
-  const handleCreateExpense = (e: React.FormEvent) => {
+  const handleCreateExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!expenseDesc || expenseAmountPKR <= 0) return;
+    const amountPaisa = parsePaisaInput(expenseAmountPKR);
+    if (!expenseDesc.trim() || amountPaisa === null || amountPaisa <= 0) {
+      setExpenseError('Enter a description and a positive amount with up to two decimal places.');
+      return;
+    }
 
     const newTx: CashTransaction = {
       id: `tx-${Date.now()}`,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       type: 'EXPENSE',
-      description: expenseDesc,
-      amountPaisa: expenseAmountPKR * 100,
+      description: expenseDesc.trim(),
+      amountPaisa,
       isOutflow: true,
       handledBy: 'Active Cashier',
     };
 
-    onAddTransaction(newTx);
-    setShowExpenseModal(false);
-    setExpenseDesc('');
-    setExpenseAmountPKR(0);
+    setExpenseError('');
+    try {
+      await onAddTransaction(newTx);
+      setShowExpenseModal(false);
+      setExpenseDesc('');
+      setExpenseAmountPKR('');
+    } catch (error) {
+      setExpenseError(error instanceof Error ? error.message : 'Could not record this expense.');
+    }
   };
 
   return (
@@ -181,8 +192,8 @@ export const CashBookScreen: React.FC<CashBookScreenProps> = ({
               <input
                 type="number"
                 placeholder="Count physical notes"
-                value={actualDrawerCashPKR || ''}
-                onChange={(e) => setActualDrawerCashPKR(Number(e.target.value))}
+                value={actualDrawerCashPKR}
+                onChange={(e) => setActualDrawerCashPKR(e.target.value)}
                 className="w-full px-3 py-2 border border-emerald-300 rounded-lg text-base font-mono font-bold"
                 disabled={shiftClosed}
               />
@@ -224,7 +235,7 @@ export const CashBookScreen: React.FC<CashBookScreenProps> = ({
             ) : (
               <button
                 onClick={() => setShiftClosed(true)}
-                disabled={actualDrawerCashPKR <= 0}
+                disabled={parsePaisaInput(actualDrawerCashPKR) === null || actualDrawerPaisa <= 0}
                 className="w-full py-2.5 px-4 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl transition disabled:opacity-50"
               >
                 Close Shift & Lock Register
@@ -264,12 +275,14 @@ export const CashBookScreen: React.FC<CashBookScreenProps> = ({
                 <input
                   type="number"
                   placeholder="0"
-                  value={expenseAmountPKR || ''}
-                  onChange={(e) => setExpenseAmountPKR(Number(e.target.value))}
+                  value={expenseAmountPKR}
+                  onChange={(e) => setExpenseAmountPKR(e.target.value)}
+                  step="0.01"
                   className="w-full px-3 py-1.5 border border-slate-300 rounded-lg font-mono font-bold"
                   required
                 />
               </div>
+              {expenseError && <p role="alert" className="text-xs font-semibold text-red-700">{expenseError}</p>}
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t">

@@ -12,7 +12,7 @@ import type { AuditRecord, PharmacyRepository, UserRecord } from './models.js';
 import type { TokenConfig } from './auth-crypto.js';
 import { requireAuth, requirePermission, requireRole } from './auth-routes.js';
 import type { IdempotencyStore } from './idempotency.js';
-import { timezoneToday } from './business-time.js';
+import { timezoneDateBounds, timezoneToday } from './business-time.js';
 import { derivedExpiryStatus } from './stock-domain.js';
 
 const idSchema = z.string().regex(/^[a-f\d]{24}$/i);
@@ -331,13 +331,25 @@ function returnDto(record: Document): Record<string, unknown> {
   };
 }
 
-function dateRangeFilter(from?: string, to?: string, field = 'occurredAt'): Document {
+function dateRangeFilter(from?: string, to?: string, field = 'occurredAt', timeZone?: string): Document {
+  const lowerBound = from
+    ? timeZone ? timezoneDateBounds(timeZone, from).start : new Date(`${from}T00:00:00.000Z`)
+    : undefined;
+  const upperBound = to
+    ? timeZone ? timezoneDateBounds(timeZone, to).end : new Date(new Date(`${to}T00:00:00.000Z`).getTime() + 86_400_000)
+    : undefined;
   return from || to ? {
     [field]: {
-      ...(from ? { $gte: new Date(`${from}T00:00:00.000Z`) } : {}),
-      ...(to ? { $lt: new Date(new Date(`${to}T00:00:00.000Z`).getTime() + 86_400_000) } : {}),
+      ...(lowerBound ? { $gte: lowerBound } : {}),
+      ...(upperBound ? { $lt: upperBound } : {}),
     },
   } : {};
+}
+
+async function shopTimeZone(repository: PharmacyRepository, shopId: ObjectId): Promise<string> {
+  const shop = await repository.findShopById(shopId);
+  if (!shop) throw new Error('SHOP_NOT_FOUND');
+  return shop.timeZone ?? 'Asia/Karachi';
 }
 
 function isRestockAllowed(
@@ -911,7 +923,11 @@ export function registerPhaseSevenRoutes(
     if (!user) return;
     const parsed = pageSchema.safeParse(request.query);
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
-    const filter = { shopId: user.shopId, ...dateRangeFilter(parsed.data.dateFrom, parsed.data.dateTo) };
+    const timeZone = await shopTimeZone(authRepository, user.shopId);
+    const filter = {
+      shopId: user.shopId,
+      ...dateRangeFilter(parsed.data.dateFrom, parsed.data.dateTo, 'occurredAt', timeZone),
+    };
     const collection = database.collection('expenses');
     const [items, total] = await Promise.all([
       collection.find(filter).sort({ occurredAt: -1, _id: -1 }).skip((parsed.data.page - 1) * parsed.data.pageSize).limit(parsed.data.pageSize).toArray(),
@@ -1041,7 +1057,14 @@ export function registerPhaseSevenRoutes(
     if (!user) return;
     const parsed = pageSchema.safeParse(request.query);
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
-    const filter = { shopId: user.shopId, ...dateRangeFilter(parsed.data.dateFrom, parsed.data.dateTo, 'createdAt') };
+    const timeZone = await shopTimeZone(authRepository, user.shopId);
+    const today = timezoneToday(timeZone).toISOString().slice(0, 10);
+    const dateFrom = parsed.data.dateFrom ?? today;
+    const dateTo = parsed.data.dateTo ?? today;
+    const filter = {
+      shopId: user.shopId,
+      ...dateRangeFilter(dateFrom, dateTo, 'createdAt', timeZone),
+    };
     const collection = database.collection('cashBookEntries');
     const [items, total] = await Promise.all([
       collection.find(filter).sort({ createdAt: -1, _id: -1 }).skip((parsed.data.page - 1) * parsed.data.pageSize).limit(parsed.data.pageSize).toArray(),
@@ -1134,8 +1157,13 @@ export function registerPhaseSevenRoutes(
     if (!user) return;
     const parsed = pageSchema.safeParse(request.query);
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
-    const from = parsed.data.dateFrom ? new Date(`${parsed.data.dateFrom}T00:00:00.000Z`) : new Date(0);
-    const to = parsed.data.dateTo ? new Date(new Date(`${parsed.data.dateTo}T00:00:00.000Z`).getTime() + 86_400_000) : new Date();
+    const timeZone = await shopTimeZone(authRepository, user.shopId);
+    const from = parsed.data.dateFrom
+      ? timezoneDateBounds(timeZone, parsed.data.dateFrom).start
+      : new Date(0);
+    const to = parsed.data.dateTo
+      ? timezoneDateBounds(timeZone, parsed.data.dateTo).end
+      : new Date();
     const filter = { shopId: user.shopId, status: 'COMPLETED', soldAt: { $gte: from, $lt: to } };
     const [sales, returns] = await Promise.all([
       database.collection('sales').aggregate([

@@ -42,6 +42,7 @@ import {
 } from './utils/storeSettings';
 import { loadShopSettings, updateShopSettings } from './data/shopSettings';
 import type { ShopProfile } from './data/shopSettings';
+import { createCashExpense, loadCashBook } from './data/finance';
 import PharmaLogo from './components/PharmaLogo';
 import type { PrintReceiptHandler } from './utils/printWorkflow';
 import { STOCK_CHANGED_EVENT } from './utils/stockAlertsEvents';
@@ -478,11 +479,17 @@ function PharmacyWorkspace({
   const [transactions, setTransactions] = useState<CashTransaction[]>([]);
   const [completedSales, setCompletedSales] = useState<CompletedSale[]>([]);
   const [dataLoadError, setDataLoadError] = useState('');
+  const refreshCashBook = React.useCallback(async () => {
+    if (getBackend() !== 'api') return;
+    const cashBook = await loadCashBook();
+    setTransactions(cashBook.transactions);
+  }, []);
 
   useEffect(() => {
     if (!session) {
       setCustomers([]);
       setLedgerEntries({});
+      setTransactions([]);
       setCompletedSales([]);
       setDataLoadError('');
       return;
@@ -517,11 +524,14 @@ function PharmacyWorkspace({
     } else {
       setCompletedSales([]);
     }
+    if (getBackend() === 'api' && session.permissions.includes('expenses')) {
+      void refreshCashBook().catch(reportLoadError);
+    }
 
     return () => {
       active = false;
     };
-  }, [session?.userId, session?.permissions]);
+  }, [session?.userId, session?.permissions, refreshCashBook]);
 
   // Global Modals
   const [showTemplatePreview, setShowTemplatePreview] = useState(false);
@@ -637,7 +647,7 @@ function PharmacyWorkspace({
     setCompletedSales((prev) => [sale, ...prev]);
     window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT));
 
-    if (sale.paymentMethod === PaymentMethod.CASH) {
+    if (getBackend() !== 'api' && sale.paymentMethod === PaymentMethod.CASH) {
       const tx: CashTransaction = {
         id: `tx-${Date.now()}`,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -648,6 +658,14 @@ function PharmacyWorkspace({
         handledBy: currentUserName,
       };
       setTransactions((prev) => [tx, ...prev]);
+    }
+    if (getBackend() === 'api' && session?.permissions.includes('expenses')) {
+      void refreshCashBook().catch((error: unknown) => {
+        setPrintNotice({
+          text: `Sale completed, but cash book could not refresh: ${error instanceof Error ? error.message : 'Please refresh the screen.'}`,
+          error: true,
+        });
+      });
     }
 
     if (session?.permissions.includes('pos')) {
@@ -677,7 +695,15 @@ function PharmacyWorkspace({
       isOutflow: false,
       handledBy: currentUserName,
     };
-    setTransactions((prev) => [tx, ...prev]);
+    if (getBackend() !== 'api') setTransactions((prev) => [tx, ...prev]);
+    else if (session?.permissions.includes('expenses')) {
+      void refreshCashBook().catch((error: unknown) => {
+        setPrintNotice({
+          text: `Payment recorded, but cash book could not refresh: ${error instanceof Error ? error.message : 'Please refresh the screen.'}`,
+          error: true,
+        });
+      });
+    }
     if (session?.permissions.includes('customers')) {
       void loadCustomerAccountsSummary().then((accounts) => {
         setCustomers(accounts.customers);
@@ -928,7 +954,21 @@ function PharmacyWorkspace({
           {activeItem === 'expenses' && (
             <CashBookScreen
               transactions={transactions}
-              onAddTransaction={(tx) => setTransactions((prev) => [tx, ...prev])}
+              onAddTransaction={async (tx) => {
+                if (getBackend() !== 'api') {
+                  setTransactions((previous) => [tx, ...previous]);
+                  return;
+                }
+                await createCashExpense(tx.description, tx.amountPaisa);
+                try {
+                  await refreshCashBook();
+                } catch (error) {
+                  setPrintNotice({
+                    text: `Expense recorded, but cash book could not refresh: ${error instanceof Error ? error.message : 'Please refresh the screen.'}`,
+                    error: true,
+                  });
+                }
+              }}
             />
           )}
 
