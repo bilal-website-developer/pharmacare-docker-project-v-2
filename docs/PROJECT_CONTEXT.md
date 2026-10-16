@@ -142,15 +142,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-16T21:29:25.565Z
+Generated at (UTC): 2026-10-16T21:30:22.434Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: wire Manage Users to Mongo API
 - feat: wire print requests to Mongo API
 - feat: persist Cash Book in Mongo API
 - feat: wire Master Data to Mongo API
 - feat: API proxy and Docker docs cleanup (Phase 0)
-- feat: wire Sales History to Mongo API
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
