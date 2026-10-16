@@ -33,3 +33,9 @@ Decisions recorded while finishing the migration. Revisit a decision only when n
 - **Decision:** Require persisted idempotency keys for authenticated business writes. Keep `/api/auth/login`, `/api/auth/refresh`, and `/api/auth/logout` outside that business idempotency store.
 - **Alternatives:** Persist response bodies for credential-bearing operations; build a separate encrypted/credential-safe replay protocol for session rotation.
 - **Reason:** Login/refresh responses contain access tokens and refresh-cookie rotation has credential lifecycle side effects. Persisting ordinary idempotency response bodies would retain token material. This exception must remain explicit in the security review; do not claim that every HTTP write route uses the business idempotency store.
+
+### Local Docker API proxy default
+
+- **Decision:** Keep the Vite dev proxy pointed at `http://127.0.0.1:3000` by default and allow `VITE_API_PROXY_TARGET` to override it for direct host-mode Fastify development on `http://127.0.0.1:3001`.
+- **Alternatives:** Hardcode the proxy to `:3001` everywhere; hardcode it to `:3000` everywhere; publish the API port in Compose.
+- **Reason:** Docker Compose runs the API on port 3000 inside the private network, while direct host development often runs Fastify on 3001. The default proxy should match the Compose runtime without preventing local host-mode debugging.

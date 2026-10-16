@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:3000';
+
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
@@ -19,7 +21,8 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
         '/api': {
-          target: 'http://127.0.0.1:3001',
+          // Compose exposes the API on port 3000; local host dev can override to 3001.
+          target: apiProxyTarget,
           changeOrigin: true,
         },
       },

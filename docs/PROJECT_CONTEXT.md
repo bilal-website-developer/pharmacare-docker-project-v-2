@@ -6,7 +6,10 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phases 0–7 have server-side implementation; targeted replica-set tests pass locally. Phase 8 has wired auth/session, Stock Alerts, Suppliers, POS catalog, Settings, POS sales, and Customer Ledger account/payment operations through the API client behind `VITE_BACKEND`; broader screen cut-over and manual UI acceptance remain pending.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phases 0–7 have server-side implementation; targeted replica-set tests pass locally. Phase 8 has wired auth/session, Stock Alerts, Suppliers, POS catalog, Settings, POS sales, Customer Ledger, Sales History, and Master Data overview/units/merge operations through the API client behind `VITE_BACKEND`; broader screen cut-over and manual UI acceptance remain pending.
+
+- Latest module: Master Data overview, units, and merge flows now use authenticated API routes with strict DTO validation and a `VITE_BACKEND=api` fallback path; the Supabase branch remains available when the flag is set to `supabase`.
+- Step 0 housekeeping: fixed the Vite proxy target to the Docker API default (`:3000`), kept a `VITE_API_PROXY_TARGET` override for direct host-mode Fastify dev on `:3001`, and documented the intended Docker vs. host API port split.
 
 ## How to run
 
@@ -169,15 +172,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-15T19:20:20.140Z
+Generated at (UTC): 2026-10-16T20:18:32.787Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: API proxy and Docker docs cleanup (Phase 0)
+- feat: wire Sales History to Mongo API
 - feat: wire Customer Ledger to Mongo API
 - feat: wire POS sales to Mongo API
 - feat: wire Settings module to Mongo API
-- feat: wire POS catalog to Mongo API
-- feat: wire Suppliers module to Mongo API
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
@@ -201,6 +204,7 @@ npm scripts:
 - - `test:shop-settings`: `tsx --test src/data/shopSettings.test.ts`
 - - `test:product-filters`: `tsx --test src/components/inventory/productFilterLogic.test.ts`
 - - `test:master-data`: `tsx --test src/components/masterDataSimilarity.test.ts`
+- - `test:master-data-api`: `tsx --test src/data/masterData.test.ts`
 - - `test:suppliers`: `tsx --test src/data/suppliers.test.ts`
 - - `test:print-snapshot`: `tsx --test src/utils/printSnapshot.test.ts`
 - - `test:print-request-editor`: `tsx --test src/utils/printRequestEditor.test.ts`
@@ -213,7 +217,7 @@ npm scripts:
 - - `test:manage-users-policy`: `tsx --test supabase/functions/manage-users/policy.test.ts`
 - - `test:api-client`: `tsx --test src/api/client.test.ts`
 - - `test:server`: `npm --prefix server test`
-- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:customer-ledger && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:server`
+- - `test`: `npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:customer-ledger && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:master-data-api && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:server`
 
 Dependencies and versions:
 - - `@e965/xlsx` ^0.20.3 (dependency)
@@ -293,6 +297,8 @@ src/
     src/constants/brand.ts
   src/data/
     src/data/customerLedger.test.ts
+    src/data/masterData.test.ts
+    src/data/masterData.ts
     src/data/mockPharmacyData.ts
     src/data/posCatalog.ts
     src/data/posCatalogLogic.test.ts
@@ -364,6 +370,7 @@ Test files:
 - src/components/inventory/stockInventoryLogic.test.ts
 - src/components/masterDataSimilarity.test.ts
 - src/data/customerLedger.test.ts
+- src/data/masterData.test.ts
 - src/data/posCatalogLogic.test.ts
 - src/data/returnLogic.test.ts
 - src/data/sales.test.ts

@@ -35,7 +35,7 @@ docker compose ps
 
 `docker compose up` waits for MongoDB health, then `mongo-init` initiates `rs0`, creates the app user with `readWrite` on `pharmacare` only, and creates the planned indexes. The API starts after initialization and MongoDB health checks pass. Nginx starts after the API health check passes.
 
-When running Vite and the API directly on the host, use two terminals: `npm run dev` serves Vite on port 3000, while `npm --prefix server run dev` starts Fastify on port 3001. Vite proxies `/api` to `http://127.0.0.1:3001`; the Fastify development default is 3001 to avoid a port conflict. Compose explicitly sets `PORT=3000` inside the API container, where Nginx proxies `/api` over the private Docker network to `api:3000`. The API container remains unpublished on the host.
+When running Vite and the API directly on the host, use two terminals: `npm run dev` serves Vite on port 3000, while `npm --prefix server run dev` starts Fastify on port 3001. The Vite proxy defaults to the Compose API target (`http://127.0.0.1:3000`) so local Docker traffic matches the container layout; to target a host-run API on port 3001, set `VITE_API_PROXY_TARGET=http://127.0.0.1:3001` before starting Vite. Compose explicitly sets `PORT=3000` inside the API container, where Nginx proxies `/api` over the private Docker network to `api:3000`. The API container remains unpublished on the host.
 
 ## Bootstrap the first API user
 
