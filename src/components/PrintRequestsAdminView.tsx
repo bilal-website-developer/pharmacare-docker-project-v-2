@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Minus, Pencil, Plus, Printer, RotateCcw, Trash2, X, XCircle } from 'lucide-react';
 import { supabase } from '../utils/supabase';
+import { getBackend } from '../api';
+import { decidePrintRequest, loadAdminPrintRequests, modifyPrintRequest } from '../data/printRequests';
+import { parsePaisaInput } from '../data/finance';
 import { parsePrintSnapshot, PrintSnapshot } from '../utils/printSnapshot';
 import { parsePrintRequestRecord, PrintRequestRecord } from '../utils/printRequestTypes';
 import { PrintReceiptHandler } from '../utils/printWorkflow';
@@ -25,6 +28,17 @@ export function PrintRequestsAdminView({ onPrintReceipt }: { onPrintReceipt: Pri
   const [editError, setEditError] = useState('');
 
   const refresh = useCallback(async () => {
+    if (getBackend() === 'api') {
+      try {
+        setRequests(await loadAdminPrintRequests());
+        setNotice(null);
+      } catch (error) {
+        setNotice({ text: error instanceof Error ? error.message : 'Could not load print requests.', error: true });
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     if (!supabase) {
       setNotice({ text: 'Supabase is not configured.', error: true });
       setLoading(false);
@@ -73,9 +87,8 @@ export function PrintRequestsAdminView({ onPrintReceipt }: { onPrintReceipt: Pri
 
   const editPreview = useMemo((): { snapshot: PrintSnapshot | null; error: string } | null => {
     if (!editingRequest) return null;
-    const discountMatch = /^\d*(?:\.\d{0,2})?$/.test(draftDiscount);
-    if (!discountMatch) return { snapshot: null, error: 'Enter a valid discount amount.' };
-    const discountPaisa = Math.round(Number(draftDiscount || '0') * 100);
+    const discountPaisa = parsePaisaInput(draftDiscount || '0');
+    if (discountPaisa === null) return { snapshot: null, error: 'Enter a valid discount amount.' };
     try {
       return {
         snapshot: recalculateEditableReceipt(
@@ -118,23 +131,29 @@ export function PrintRequestsAdminView({ onPrintReceipt }: { onPrintReceipt: Pri
       setEditError(editPreview?.error || 'Correct the receipt details before saving.');
       return;
     }
-    if (!supabase) {
+    if (getBackend() !== 'api' && !supabase) {
       setEditError('Supabase is not configured.');
       return;
     }
     setBusyId(editingRequest.id);
     setEditError('');
     try {
-      const { data, error } = await supabase.rpc('modify_print_request', {
-        p_request_id: editingRequest.id,
-        p_lines: editPreview.snapshot.data.lines,
-        p_discount_paisa: editPreview.snapshot.data.discountPaisa,
-      });
-      if (error) throw new Error(error.message);
-      if (typeof data !== 'object' || data === null || !('payload' in data)) {
-        throw new Error('The server did not return the updated receipt snapshot.');
+      let updatedPayload: unknown;
+      if (getBackend() === 'api') {
+        updatedPayload = (await modifyPrintRequest(editingRequest.id, editPreview.snapshot)).payload;
+      } else {
+        const { data, error } = await supabase!.rpc('modify_print_request', {
+          p_request_id: editingRequest.id,
+          p_lines: editPreview.snapshot.data.lines,
+          p_discount_paisa: editPreview.snapshot.data.discountPaisa,
+        });
+        if (error) throw new Error(error.message);
+        if (typeof data !== 'object' || data === null || !('payload' in data)) {
+          throw new Error('The server did not return the updated receipt snapshot.');
+        }
+        updatedPayload = data.payload;
       }
-      const updatedSnapshot = parsePrintSnapshot(data.payload);
+      const updatedSnapshot = parsePrintSnapshot(updatedPayload);
       setRequests((current) => current.map((request) =>
         request.id === editingRequest.id ? { ...request, payload: updatedSnapshot } : request
       ));
@@ -149,13 +168,9 @@ export function PrintRequestsAdminView({ onPrintReceipt }: { onPrintReceipt: Pri
 
   const addItem = () => {
     const name = newItemName.trim();
-    if (!name || !/^\d+(?:\.\d{0,2})?$/.test(newItemPrice)) {
+    const ratePaisa = parsePaisaInput(newItemPrice);
+    if (!name || ratePaisa === null) {
       setEditError('Enter an item name and a valid price.');
-      return;
-    }
-    const ratePaisa = Math.round(Number(newItemPrice) * 100);
-    if (!Number.isSafeInteger(ratePaisa)) {
-      setEditError('Item price is too large.');
       return;
     }
     setDraftLines((current) => [...current, { qty: 1, name, ratePaisa }]);
@@ -171,16 +186,21 @@ export function PrintRequestsAdminView({ onPrintReceipt }: { onPrintReceipt: Pri
   }, [refresh]);
 
   const decide = async (request: PrintRequestRecord, decision: 'approved' | 'rejected', note: string | null) => {
-    if (!supabase) return setNotice({ text: 'Supabase is not configured.', error: true });
+    if (getBackend() !== 'api' && !supabase) return setNotice({ text: 'Supabase is not configured.', error: true });
     setBusyId(request.id);
     setNotice(null);
     try {
-      const { data, error } = await supabase.rpc('decide_print_request', {
-        p_request_id: request.id,
-        p_decision: decision,
-        p_note: note,
-      });
-      if (error) throw new Error(error.message);
+      const data = getBackend() === 'api'
+        ? await decidePrintRequest(request.id, decision, note)
+        : await (async () => {
+          const result = await supabase!.rpc('decide_print_request', {
+            p_request_id: request.id,
+            p_decision: decision,
+            p_note: note,
+          });
+          if (result.error) throw new Error(result.error.message);
+          return result.data;
+        })();
       if (decision === 'approved') {
         if (typeof data !== 'object' || data === null || !('payload' in data)) {
           throw new Error('Approval succeeded but no receipt snapshot was returned.');

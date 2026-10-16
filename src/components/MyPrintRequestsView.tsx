@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../utils/supabase';
+import { getBackend } from '../api';
+import { loadMyPrintRequests } from '../data/printRequests';
 import { parsePrintRequestRecord, PrintRequestRecord } from '../utils/printRequestTypes';
 
 function statusClass(status: PrintRequestRecord['status']) {
@@ -16,25 +18,22 @@ export function MyPrintRequestsView({ userId }: { userId: string }) {
   const knownStatuses = useRef<Map<string, PrintRequestRecord['status']> | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!supabase) {
-      setError('Supabase is not configured.');
-      setLoading(false);
-      return;
-    }
-    const { data, error: queryError } = await supabase
-      .from('print_requests')
-      .select('id,type,receipt_ref,payload,requested_by,requested_at,status,decided_by,decided_at,note,printed_at')
-      .eq('requested_by', userId)
-      .order('requested_at', { ascending: false })
-      .limit(100);
-    if (queryError) {
-      setError(`Could not load print requests: ${queryError.message}`);
-      setLoading(false);
-      return;
-    }
-
     try {
-      const parsed = (data ?? []).map(parsePrintRequestRecord);
+      let parsed: PrintRequestRecord[];
+      if (getBackend() === 'api') {
+        parsed = await loadMyPrintRequests();
+      } else {
+        if (!supabase) throw new Error('Supabase is not configured.');
+        const { data, error: queryError } = await supabase
+          .from('print_requests')
+          .select('id,type,receipt_ref,payload,requested_by,requested_at,status,decided_by,decided_at,note,printed_at')
+          .eq('requested_by', userId)
+          .order('requested_at', { ascending: false })
+          .limit(100);
+        if (queryError) throw new Error(queryError.message);
+        if (!Array.isArray(data)) throw new Error('The print-request list response is invalid.');
+        parsed = data.map(parsePrintRequestRecord);
+      }
       const nextStatuses = new Map(parsed.map((request) => [request.id, request.status]));
       const previous = knownStatuses.current;
       if (previous) {

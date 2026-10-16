@@ -6,6 +6,8 @@ import {
   type ReceiptData,
 } from './receipt';
 import { supabase } from './supabase';
+import { getBackend } from '../api';
+import { markPrintRequestPrinted, submitPrintRequest } from '../data/printRequests';
 import {
   canPrintReceipt,
   isPrintSnapshotSafe,
@@ -92,9 +94,13 @@ async function requestReceiptPrint(
   type: PrintRequestType,
   snapshot: PrintSnapshot,
 ): Promise<void> {
-  if (!supabase) throw new Error('Supabase is not configured.');
   const receiptRef = snapshot.data.memoNo.trim()
     || `${type}:${crypto.randomUUID()}`;
+  if (getBackend() === 'api') {
+    await submitPrintRequest(type, receiptRef, snapshot);
+    return;
+  }
+  if (!supabase) throw new Error('Supabase is not configured.');
   const { data, error } = await supabase.rpc('request_print', {
     p_type: type,
     p_receipt_ref: receiptRef,
@@ -150,11 +156,15 @@ export async function printReceipt(
 
   await printHtmlDocument(html);
   if (options.approvedRequestId) {
-    if (!supabase) throw new Error('Receipt was sent to the print dialog, but print tracking is unavailable because Supabase is not configured.');
-    const { error } = await supabase.rpc('mark_printed_request', {
-      p_request_id: options.approvedRequestId,
-    });
-    if (error) throw new Error(`Receipt was sent to the print dialog, but print tracking failed: ${error.message}`);
+    if (getBackend() === 'api') {
+      await markPrintRequestPrinted(options.approvedRequestId);
+    } else {
+      if (!supabase) throw new Error('Receipt was sent to the print dialog, but print tracking is unavailable because Supabase is not configured.');
+      const { error } = await supabase.rpc('mark_printed_request', {
+        p_request_id: options.approvedRequestId,
+      });
+      if (error) throw new Error(`Receipt was sent to the print dialog, but print tracking failed: ${error.message}`);
+    }
   }
   return 'printed';
 }

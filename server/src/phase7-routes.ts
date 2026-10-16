@@ -1474,9 +1474,16 @@ export function registerPhaseSevenRoutes(
       return reply.code(404).send({ error: 'NOT_FOUND' });
     }
     if (!canPrint(user, record.type === 'sale' ? 'sale' : 'payment')) return reply.code(403).send({ error: 'FORBIDDEN' });
-    const now = new Date();
     const updated = await transaction(client, async (session) => {
-      const printRequest = await database.collection('printRequests').findOneAndUpdate(
+      const collection = database.collection('printRequests');
+      const current = await collection.findOne(
+        { _id: requestId, shopId: user.shopId, status: 'approved' },
+        { session },
+      );
+      if (!current) return null;
+      if (current.printedAt instanceof Date) return current;
+      const now = new Date();
+      const printRequest = await collection.findOneAndUpdate(
         { _id: requestId, shopId: user.shopId, status: 'approved', printedAt: { $exists: false } },
         { $set: { printedAt: now, updatedAt: now } },
         { returnDocument: 'after', includeResultMetadata: false, session },
@@ -1487,7 +1494,7 @@ export function registerPhaseSevenRoutes(
       return printRequest;
     });
     if (!updated) return reply.code(409).send({ error: 'PRINT_REQUEST_NOT_APPROVED' });
-    return reply.send({ status: updated.status, printedAt: now });
+    return reply.send({ status: updated.status, printedAt: updated.printedAt });
   });
 }
 

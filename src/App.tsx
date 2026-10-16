@@ -43,6 +43,7 @@ import {
 import { loadShopSettings, updateShopSettings } from './data/shopSettings';
 import type { ShopProfile } from './data/shopSettings';
 import { createCashExpense, loadCashBook } from './data/finance';
+import { loadPendingPrintCount } from './data/printRequests';
 import PharmaLogo from './components/PharmaLogo';
 import type { PrintReceiptHandler } from './utils/printWorkflow';
 import { STOCK_CHANGED_EVENT } from './utils/stockAlertsEvents';
@@ -300,23 +301,33 @@ function PharmacyWorkspace({
     let disposed = false;
     let failureReported = false;
     const refreshCount = async () => {
-      if (!supabase) {
-        if (!failureReported && !disposed) {
-          setPrintNotice({ text: 'Supabase is not configured; print request counts are unavailable.', error: true });
-          failureReported = true;
+      try {
+        if (getBackend() === 'api') {
+          const count = await loadPendingPrintCount();
+          if (!disposed) {
+            failureReported = false;
+            setPendingPrintCount(count);
+          }
+          return;
         }
-        return;
-      }
-      const { data, error } = await supabase.rpc('pending_print_count');
-      if (disposed) return;
-      if (error) {
-        if (!failureReported) setPrintNotice({ text: `Could not refresh pending print requests: ${error.message}`, error: true });
-        failureReported = true;
-      } else if (typeof data === 'number' && Number.isFinite(data)) {
+        if (!supabase) throw new Error('Supabase is not configured.');
+        const { data, error } = await supabase.rpc('pending_print_count');
+        if (error) throw new Error(error.message);
+        if (typeof data !== 'number' || !Number.isFinite(data)) {
+          throw new Error('The server returned an invalid pending print count.');
+        }
+        if (disposed) return;
         failureReported = false;
         setPendingPrintCount(data);
-      } else {
-        setPrintNotice({ text: 'The server returned an invalid pending print count.', error: true });
+      } catch (error) {
+        if (disposed) return;
+        if (!failureReported) {
+          setPrintNotice({
+            text: `Could not refresh pending print requests: ${error instanceof Error ? error.message : 'Please try again.'}`,
+            error: true,
+          });
+        }
+        failureReported = true;
       }
     };
     void refreshCount();
