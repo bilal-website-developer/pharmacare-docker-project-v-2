@@ -9,6 +9,8 @@ import {
 import type {
   CatalogListOptions,
   CatalogRepository,
+  MasterDataOverview,
+  MasterDataUnit,
   TrashRecord,
 } from '../catalog-repository.js';
 import type { Role } from '../permissions.js';
@@ -90,6 +92,98 @@ export class MemoryCatalogRepository implements CatalogRepository {
 
   async getByName(collection: 'categories' | 'brands', shopId: ObjectId, normalizedName: string): Promise<CatalogRecord | null> {
     return this.active(collection, shopId).find((record) => record.normalizedName === normalizedName) ?? null;
+  }
+
+  async masterDataOverview(shopId: ObjectId, _today: Date, _showCost: boolean): Promise<MasterDataOverview> {
+    const categories = this.active('categories', shopId);
+    const manufacturers = this.active('brands', shopId);
+    const medicines = this.active('medicines', shopId);
+    const units = this.active('medicineUnits', shopId);
+    const summarize = (record: CatalogRecord, field: 'categoryId' | 'brandId') => {
+      const related = medicines.filter((medicine) => (medicine[field] as ObjectId | undefined)?.equals(record._id));
+      return {
+        id: record._id.toHexString(),
+        name: String(record.name),
+        is_active: record.isActive === true,
+        product_count: related.length,
+        low_count: 0,
+        out_count: 0,
+        expiring_count: 0,
+        stock_value_paisa: null,
+      };
+    };
+    return {
+      categories: categories.map((record) => summarize(record, 'categoryId')),
+      manufacturers: manufacturers.map((record) => summarize(record, 'brandId')),
+      summary: {
+        category_count: categories.length,
+        active_category_count: categories.filter((record) => record.isActive === true).length,
+        manufacturer_count: manufacturers.length,
+        active_manufacturer_count: manufacturers.filter((record) => record.isActive === true).length,
+        product_count: medicines.length,
+        unit_count: units.length,
+      },
+    };
+  }
+
+  async listMasterUnits(shopId: ObjectId): Promise<MasterDataUnit[]> {
+    const medicines = new Map(this.active('medicines', shopId)
+      .map((medicine) => [medicine._id.toHexString(), medicine]));
+    return this.active('medicineUnits', shopId).flatMap((unit) => {
+      const medicineId = unit.medicineId;
+      const medicine = medicineId ? medicines.get(medicineId.toHexString()) : undefined;
+      if (!medicineId || !medicine) return [];
+      return [{
+        id: unit._id.toHexString(),
+        medicine_id: medicineId.toHexString(),
+        name: String(unit.name),
+        conversion_factor: Number(unit.conversionFactorBaseUnits),
+        is_default_sale_unit: unit.isDefaultSaleUnit === true,
+        price_paisa: String(unit.pricePaisa),
+        barcode: typeof unit.barcode === 'string' ? unit.barcode : null,
+        medicine_name: `${String(medicine.name)} · ${String(medicine.genericName ?? '')} (${String(medicine.code)})`,
+      }];
+    }).sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async mergeNamed(
+    collection: 'categories' | 'brands',
+    shopId: ObjectId,
+    sourceId: ObjectId,
+    targetId: ObjectId,
+    actorId: ObjectId,
+    mayUpdateProducts: boolean,
+    audit: (source: CatalogRecord, target: CatalogRecord, productCount: number) => AuditRecord,
+    trash: (source: CatalogRecord) => TrashRecord,
+  ): Promise<number | null> {
+    if (sourceId.equals(targetId)) throw new Error('MERGE_TARGET_INVALID');
+    const source = await this.get(collection, shopId, sourceId);
+    const target = await this.get(collection, shopId, targetId);
+    if (!source || !target) return null;
+    const referenceField = collection === 'categories' ? 'categoryId' : 'brandId';
+    const snapshotField = collection === 'categories' ? 'categoryName' : 'brandName';
+    const related = this.active('medicines', shopId)
+      .filter((medicine) => (medicine[referenceField] as ObjectId | undefined)?.equals(sourceId));
+    if (related.length > 0 && !mayUpdateProducts) throw new Error('PRODUCTS_PERMISSION_REQUIRED');
+    const now = new Date();
+    for (const medicine of related) {
+      medicine[referenceField] = targetId;
+      medicine[snapshotField] = target.name;
+      medicine.updatedBy = actorId;
+      medicine.updatedAt = now;
+    }
+    const deleted: CatalogRecord = {
+      ...source,
+      activeBeforeDelete: source.isActive,
+      isActive: false,
+      deletedAt: now,
+      updatedBy: actorId,
+      updatedAt: now,
+    };
+    this.map(collection).set(sourceId.toHexString(), deleted);
+    this.trash.push(trash(source));
+    this.audits.push(audit(source, target, related.length));
+    return related.length;
   }
 
   async create(collection: CatalogCollection, record: CatalogRecord, _actorId: ObjectId, audit: AuditRecord): Promise<CatalogRecord> {

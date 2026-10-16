@@ -3,6 +3,17 @@ import {
   AlertCircle, Check, Edit2, Layers, Merge, Plus, RefreshCw, Search,
   Tag, Trash2, X,
 } from 'lucide-react';
+import { getBackend } from '../api';
+import {
+  deleteMasterDataName,
+  loadMasterDataOverview,
+  loadMasterDataUnits,
+  mergeMasterDataNames,
+  saveMasterDataName,
+  type MasterDataOverview,
+  type MasterDataUnit,
+  type MasterDataValue,
+} from '../data/masterData';
 import { usePermissions } from '../permissions';
 import { fetchAllSupabaseRows } from '../utils/fetchAllSupabaseRows';
 import { getSupabaseErrorMessage } from '../utils/supabaseError';
@@ -12,41 +23,8 @@ import { findSimilarNames, type SimilarNamePair } from './masterDataSimilarity';
 type MasterTab = 'categories' | 'brands' | 'units';
 type MasterKind = 'category' | 'brand';
 type SortMode = 'name' | 'products' | 'stock';
-
-interface MasterValue {
-  id: string;
-  name: string;
-  is_active: boolean;
-  product_count: number;
-  low_count: number;
-  out_count: number;
-  expiring_count: number;
-  stock_value_paisa: number | null;
-}
-
-interface UnitRow {
-  id: string;
-  medicine_id: string;
-  name: string;
-  conversion_factor: number;
-  is_default_sale_unit: boolean;
-  price_paisa: number;
-  barcode: string | null;
-  medicine_name: string;
-}
-
-interface MasterOverview {
-  categories: MasterValue[];
-  manufacturers: MasterValue[];
-  summary: {
-    category_count: number;
-    active_category_count: number;
-    manufacturer_count: number;
-    active_manufacturer_count: number;
-    product_count: number;
-    unit_count: number;
-  };
-}
+type MasterValue = MasterDataValue;
+type MasterOverview = MasterDataOverview;
 
 const FIELD = 'w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 const PANEL = 'rounded-[14px] border border-border bg-surface shadow-[0_1px_8px_rgba(11,59,42,0.08)]';
@@ -119,7 +97,7 @@ export function MasterDataView({ onViewProducts }: {
   const canViewProducts = can('products');
   const [tab, setTab] = useState<MasterTab>('categories');
   const [overview, setOverview] = useState<MasterOverview | null>(null);
-  const [units, setUnits] = useState<UnitRow[]>([]);
+  const [units, setUnits] = useState<MasterDataUnit[]>([]);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortMode>('name');
   const [loading, setLoading] = useState(true);
@@ -135,6 +113,19 @@ export function MasterDataView({ onViewProducts }: {
   const [saving, setSaving] = useState(false);
 
   const loadOverview = useCallback(async () => {
+    if (getBackend() === 'api') {
+      setLoading(true);
+      setError('');
+      try {
+        setOverview(await loadMasterDataOverview());
+      } catch (caught) {
+        setError(errorText(caught));
+        setOverview(null);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     const client = supabase;
     if (!client) {
       setError('Supabase is not configured.');
@@ -157,6 +148,19 @@ export function MasterDataView({ onViewProducts }: {
   }, []);
 
   const loadUnits = useCallback(async () => {
+    if (getBackend() === 'api') {
+      setUnitsLoading(true);
+      setUnitsError('');
+      try {
+        setUnits(await loadMasterDataUnits());
+      } catch (caught) {
+        setUnitsError(errorText(caught));
+        setUnits([]);
+      } finally {
+        setUnitsLoading(false);
+      }
+      return;
+    }
     const client = supabase;
     if (!client) {
       setUnitsError('Supabase is not configured.');
@@ -211,7 +215,7 @@ export function MasterDataView({ onViewProducts }: {
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!supabase || !editing) return;
+    if (!editing) return;
     const cleanName = name.trim();
     if (!cleanName) {
       setNotice('Name is required.');
@@ -220,6 +224,14 @@ export function MasterDataView({ onViewProducts }: {
     setSaving(true);
     setNotice('');
     try {
+      if (getBackend() === 'api') {
+        await saveMasterDataName(editing.kind, editing.item?.id ?? null, cleanName, active);
+        setEditing(null);
+        setNotice(`${editing.kind === 'category' ? 'Category' : 'Manufacturer'} saved.`);
+        await loadOverview();
+        return;
+      }
+      if (!supabase) throw new Error('Supabase is not configured.');
       const { error: rpcError } = await supabase.rpc(
         editing.kind === 'category' ? 'save_category' : 'save_brand',
         editing.kind === 'category'
@@ -238,17 +250,22 @@ export function MasterDataView({ onViewProducts }: {
   };
 
   const remove = async () => {
-    if (!supabase || !pendingDelete) return;
+    if (!pendingDelete) return;
     setSaving(true);
     setError('');
     setNotice('');
     try {
       const { kind, item } = pendingDelete;
-      const { error: rpcError } = await supabase.rpc(
-        kind === 'category' ? 'delete_category' : 'delete_brand',
-        kind === 'category' ? { p_category_id: item.id } : { p_brand_id: item.id },
-      );
-      if (rpcError) throw rpcError;
+      if (getBackend() === 'api') {
+        await deleteMasterDataName(kind, item.id);
+      } else {
+        if (!supabase) throw new Error('Supabase is not configured.');
+        const { error: rpcError } = await supabase.rpc(
+          kind === 'category' ? 'delete_category' : 'delete_brand',
+          kind === 'category' ? { p_category_id: item.id } : { p_brand_id: item.id },
+        );
+        if (rpcError) throw rpcError;
+      }
       setPendingDelete(null);
       setNotice(`${kind === 'category' ? 'Category' : 'Manufacturer'} deleted.`);
       await loadOverview();
@@ -283,7 +300,7 @@ export function MasterDataView({ onViewProducts }: {
   };
 
   const performMerge = async () => {
-    if (!supabase || !merge) return;
+    if (!merge) return;
     const target = (merge.kind === 'category' ? overview?.categories : overview?.manufacturers)
       ?.find((item) => item.id === merge.targetId);
     if (!target) {
@@ -294,16 +311,23 @@ export function MasterDataView({ onViewProducts }: {
     setError('');
     setNotice('');
     try {
-      const { data, error: rpcError } = await supabase.rpc(
-        merge.kind === 'category' ? 'merge_categories' : 'merge_brands',
-        merge.kind === 'category'
-          ? { p_source_category_id: merge.source.id, p_target_category_id: target.id }
-          : { p_source_brand_id: merge.source.id, p_target_brand_id: target.id },
-      );
-      if (rpcError) throw rpcError;
-      if (typeof data !== 'number') throw new Error('The merge service returned an invalid response.');
+      let productCount: number;
+      if (getBackend() === 'api') {
+        productCount = await mergeMasterDataNames(merge.kind, merge.source.id, target.id);
+      } else {
+        if (!supabase) throw new Error('Supabase is not configured.');
+        const { data, error: rpcError } = await supabase.rpc(
+          merge.kind === 'category' ? 'merge_categories' : 'merge_brands',
+          merge.kind === 'category'
+            ? { p_source_category_id: merge.source.id, p_target_category_id: target.id }
+            : { p_source_brand_id: merge.source.id, p_target_brand_id: target.id },
+        );
+        if (rpcError) throw rpcError;
+        if (typeof data !== 'number') throw new Error('The merge service returned an invalid response.');
+        productCount = data;
+      }
       setMerge(null);
-      setNotice(`Merged “${merge.source.name}” into “${target.name}”; ${data} product${data === 1 ? '' : 's'} updated.`);
+      setNotice(`Merged “${merge.source.name}” into “${target.name}”; ${productCount} product${productCount === 1 ? '' : 's'} updated.`);
       await loadOverview();
     } catch (caught) {
       setError(errorText(caught));

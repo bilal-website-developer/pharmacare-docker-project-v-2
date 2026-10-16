@@ -147,6 +147,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
+- 2026-10-17 — Completed the Master Data API adapter batch for authenticated overview, units, name CRUD, and merge flows with strict DTO allowlists. Focused tests: client 3/3 and server catalog 9/9; lint/build passed. This validates local code, not manual UI acceptance or production behavior.
 - 2026-10-15 — Phase 7 implemented Mongo returns, voids, print requests, shop settings, expenses, cash book, sales/stock reports, and live dashboard summary. Targeted Compose replica-set tests passed 9/9 (0 failed/skipped); current root suite passed 184, failed 0, skipped 9. Manual UI acceptance and production verification remain open.
 - 2026-10-15 — Phase 8 wires auth/session, Stock Alerts, Suppliers, POS catalog, server-backed Settings, and POS checkout behind `VITE_BACKEND`; API writes use idempotency keys and the Supabase fallback remains. POS sales/customer adapter tests passed 3/3, POS catalog tests 6/6, server sales tests 9/9, real Mongo suite 10/10, and the full suite 199 passed, 0 failed, 10 Mongo integration skips. Manual UI acceptance remains pending.
 - 2026-10-16 — Phase 8 wires Customer Ledger account loading, customer creation, and cash payment through strict API DTO adapters while preserving Supabase fallback. Focused tests passed 4/4; lint/build passed; full suite passed 203, failed 0, skipped 10. Manual UI acceptance remains pending.
@@ -172,7 +173,7 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-16T20:18:32.787Z
+Generated at (UTC): 2026-10-16T20:29:28.573Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:

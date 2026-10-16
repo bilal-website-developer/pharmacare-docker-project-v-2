@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto';
 import {
+  Long,
   MongoClient,
   ObjectId,
   type ClientSession,
@@ -11,6 +12,7 @@ import {
 import type { AuditRecord } from './models.js';
 import { generateInternalEan13, type CatalogCollection, type CatalogRecord, type CatalogEntityType } from './catalog-domain.js';
 import type { Role } from './permissions.js';
+import type { StockBatchRecord } from './stock-domain.js';
 
 export interface CatalogListOptions {
   collection: CatalogCollection;
@@ -35,10 +37,47 @@ export interface TrashRecord {
   occurredAt: Date;
 }
 
+export interface MasterDataValue {
+  id: string;
+  name: string;
+  is_active: boolean;
+  product_count: number;
+  low_count: number;
+  out_count: number;
+  expiring_count: number;
+  stock_value_paisa: string | null;
+}
+
+export interface MasterDataOverview {
+  categories: MasterDataValue[];
+  manufacturers: MasterDataValue[];
+  summary: {
+    category_count: number;
+    active_category_count: number;
+    manufacturer_count: number;
+    active_manufacturer_count: number;
+    product_count: number;
+    unit_count: number;
+  };
+}
+
+export interface MasterDataUnit {
+  id: string;
+  medicine_id: string;
+  name: string;
+  conversion_factor: number;
+  is_default_sale_unit: boolean;
+  price_paisa: string;
+  barcode: string | null;
+  medicine_name: string;
+}
+
 export interface CatalogRepository {
   list(options: CatalogListOptions): Promise<{ rows: CatalogRecord[]; total: number }>;
   get(collection: CatalogCollection, shopId: ObjectId, id: ObjectId, includeDeleted?: boolean): Promise<CatalogRecord | null>;
   getByName(collection: 'categories' | 'brands', shopId: ObjectId, normalizedName: string): Promise<CatalogRecord | null>;
+  masterDataOverview(shopId: ObjectId, today: Date, showCost: boolean): Promise<MasterDataOverview>;
+  listMasterUnits(shopId: ObjectId): Promise<MasterDataUnit[]>;
   create(collection: CatalogCollection, record: CatalogRecord, actorId: ObjectId, audit: AuditRecord): Promise<CatalogRecord>;
   createMedicine(medicine: CatalogRecord, units: CatalogRecord[], actorId: ObjectId, audits: AuditRecord[]): Promise<void>;
   update(
@@ -76,6 +115,16 @@ export interface CatalogRepository {
   latestCosts(shopId: ObjectId, medicineIds: ObjectId[]): Promise<Map<string, string>>;
   defaultUnits(shopId: ObjectId, medicineIds: ObjectId[]): Promise<Map<string, CatalogRecord>>;
   assignBarcode(shopId: ObjectId, medicineId: ObjectId, unitId: ObjectId | undefined, actorId: ObjectId, audit: AuditRecord): Promise<string>;
+  mergeNamed(
+    collection: 'categories' | 'brands',
+    shopId: ObjectId,
+    sourceId: ObjectId,
+    targetId: ObjectId,
+    actorId: ObjectId,
+    mayUpdateProducts: boolean,
+    audit: (source: CatalogRecord, target: CatalogRecord, productCount: number) => AuditRecord,
+    trash: (source: CatalogRecord) => TrashRecord,
+  ): Promise<number | null>;
 }
 
 function escapeRegex(value: string): string {
@@ -154,6 +203,177 @@ export class MongoCatalogRepository implements CatalogRepository {
 
   async getByName(collection: 'categories' | 'brands', shopId: ObjectId, normalizedName: string): Promise<CatalogRecord | null> {
     return this.records(collection).findOne({ shopId, normalizedName, deletedAt: null });
+  }
+
+  async masterDataOverview(shopId: ObjectId, today: Date, showCost: boolean): Promise<MasterDataOverview> {
+    const [categories, manufacturers, medicines, units, batches] = await Promise.all([
+      this.records('categories').find({ shopId, deletedAt: null }).sort({ normalizedName: 1, _id: 1 }).toArray(),
+      this.records('brands').find({ shopId, deletedAt: null }).sort({ normalizedName: 1, _id: 1 }).toArray(),
+      this.records('medicines').find({ shopId, deletedAt: null }).toArray(),
+      this.records('medicineUnits').countDocuments({ shopId, deletedAt: null }),
+      this.database.collection<StockBatchRecord>('stockBatches').find({
+        shopId,
+        quantityRemainingBaseUnits: { $gt: Long.ZERO },
+      }).toArray(),
+    ]);
+    const expiringThrough = new Date(today.getTime() + 90 * 86_400_000);
+    const medicineById = new Map(medicines.map((medicine) => [medicine._id.toHexString(), medicine]));
+    const quantities = new Map<string, bigint>();
+    const values = new Map<string, bigint>();
+    const expiringCounts = new Map<string, number>();
+    for (const batch of batches) {
+      const medicineId = batch.medicineId.toHexString();
+      const medicine = medicineById.get(medicineId);
+      if (!medicine || medicine.isActive !== true) continue;
+      const categoryId = medicine.categoryId instanceof ObjectId ? medicine.categoryId.toHexString() : '';
+      const brandId = medicine.brandId instanceof ObjectId ? medicine.brandId.toHexString() : '';
+      const quantity = BigInt(batch.quantityRemainingBaseUnits.toString());
+      const eligible = (batch.status === 'ACTIVE' || batch.status === 'NEAR_EXPIRY')
+        && batch.expiryDate >= today;
+      if (eligible) {
+        quantities.set(medicineId, (quantities.get(medicineId) ?? 0n) + quantity);
+        if (showCost) {
+          const batchValue = quantity * BigInt(batch.unitCostPaisaPerBaseUnit.toString());
+          if (categoryId) values.set(categoryId, (values.get(categoryId) ?? 0n) + batchValue);
+          if (brandId) values.set(`brand:${brandId}`, (values.get(`brand:${brandId}`) ?? 0n) + batchValue);
+        }
+      }
+      if ((batch.status === 'ACTIVE' || batch.status === 'NEAR_EXPIRY')
+        && batch.expiryDate >= today && batch.expiryDate <= expiringThrough) {
+        if (categoryId) expiringCounts.set(categoryId, (expiringCounts.get(categoryId) ?? 0) + 1);
+        if (brandId) {
+          const key = `brand:${brandId}`;
+          expiringCounts.set(key, (expiringCounts.get(key) ?? 0) + 1);
+        }
+      }
+    }
+    const summarize = (record: CatalogRecord, groupKey: string): MasterDataValue => {
+      const related = medicines.filter((medicine) => {
+        const id = medicine[groupKey === 'category' ? 'categoryId' : 'brandId'];
+        return id instanceof ObjectId && id.equals(record._id);
+      });
+      let lowCount = 0;
+      let outCount = 0;
+      for (const medicine of related) {
+        if (medicine.isActive !== true) continue;
+        const quantity = quantities.get(medicine._id.toHexString()) ?? 0n;
+        if (quantity === 0n) outCount += 1;
+        else if (Number(medicine.minStockAlert ?? 0) > 0
+          && quantity <= BigInt(Number(medicine.minStockAlert))) lowCount += 1;
+      }
+      const stockValue = showCost
+        ? values.get(groupKey === 'category' ? record._id.toHexString() : `brand:${record._id.toHexString()}`) ?? 0n
+        : null;
+      return {
+        id: record._id.toHexString(),
+        name: String(record.name),
+        is_active: record.isActive === true,
+        product_count: related.length,
+        low_count: lowCount,
+        out_count: outCount,
+        expiring_count: expiringCounts.get(groupKey === 'category'
+          ? record._id.toHexString()
+          : `brand:${record._id.toHexString()}`) ?? 0,
+        stock_value_paisa: stockValue === null ? null : stockValue.toString(),
+      };
+    };
+    return {
+      categories: categories.map((record) => summarize(record, 'category')),
+      manufacturers: manufacturers.map((record) => summarize(record, 'brand')),
+      summary: {
+        category_count: categories.length,
+        active_category_count: categories.filter((record) => record.isActive === true).length,
+        manufacturer_count: manufacturers.length,
+        active_manufacturer_count: manufacturers.filter((record) => record.isActive === true).length,
+        product_count: medicines.length,
+        unit_count: units,
+      },
+    };
+  }
+
+  async listMasterUnits(shopId: ObjectId): Promise<MasterDataUnit[]> {
+    const units = await this.records('medicineUnits')
+      .find({ shopId, deletedAt: null })
+      .sort({ normalizedName: 1, _id: 1 })
+      .toArray();
+    const medicineIds = [...new Map(units
+      .filter((unit) => unit.medicineId instanceof ObjectId)
+      .map((unit) => [unit.medicineId!.toHexString(), unit.medicineId!])).values()];
+    const medicines = medicineIds.length
+      ? await this.records('medicines').find({ shopId, _id: { $in: medicineIds }, deletedAt: null }).toArray()
+      : [];
+    const names = new Map(medicines.map((medicine) => [medicine._id.toHexString(),
+      `${String(medicine.name)} · ${String(medicine.genericName ?? '')} (${String(medicine.code)})`]));
+    return units.flatMap((unit) => {
+      if (!(unit.medicineId instanceof ObjectId)) return [];
+      return [{
+        id: unit._id.toHexString(),
+        medicine_id: unit.medicineId.toHexString(),
+        name: String(unit.name),
+        conversion_factor: Number(unit.conversionFactorBaseUnits),
+        is_default_sale_unit: unit.isDefaultSaleUnit === true,
+        price_paisa: String(unit.pricePaisa),
+        barcode: typeof unit.barcode === 'string' ? unit.barcode : null,
+        medicine_name: names.get(unit.medicineId.toHexString()) ?? 'Unknown medicine',
+      }];
+    });
+  }
+
+  async mergeNamed(
+    collection: 'categories' | 'brands',
+    shopId: ObjectId,
+    sourceId: ObjectId,
+    targetId: ObjectId,
+    actorId: ObjectId,
+    mayUpdateProducts: boolean,
+    audit: (source: CatalogRecord, target: CatalogRecord, productCount: number) => AuditRecord,
+    trash: (source: CatalogRecord) => TrashRecord,
+  ): Promise<number | null> {
+    const session = this.client.startSession();
+    let updatedCount: number | null = null;
+    try {
+      await session.withTransaction(async () => {
+        if (sourceId.equals(targetId)) throw new Error('MERGE_TARGET_INVALID');
+        const records = this.records(collection);
+        const source = await records.findOne({ _id: sourceId, shopId, deletedAt: null }, { session });
+        const target = await records.findOne({ _id: targetId, shopId, deletedAt: null }, { session });
+        if (!source || !target) return;
+        const referenceField = collection === 'categories' ? 'categoryId' : 'brandId';
+        const snapshotField = collection === 'categories' ? 'categoryName' : 'brandName';
+        const medicineFilter = { shopId, deletedAt: null, [referenceField]: sourceId };
+        const productCount = await this.records('medicines').countDocuments(medicineFilter, { session });
+        if (productCount > 0 && !mayUpdateProducts) throw new Error('PRODUCTS_PERMISSION_REQUIRED');
+        const now = new Date();
+        if (productCount > 0) {
+          await this.records('medicines').updateMany(medicineFilter, {
+            $set: {
+              [referenceField]: targetId,
+              [snapshotField]: target.name,
+              updatedBy: actorId,
+              updatedAt: now,
+            },
+          }, { session });
+        }
+        await records.updateOne({ _id: sourceId, shopId, deletedAt: null }, {
+          $set: {
+            activeBeforeDelete: typeof source.isActive === 'boolean' ? source.isActive : undefined,
+            isActive: false,
+            deletedAt: now,
+            updatedBy: actorId,
+            updatedAt: now,
+          },
+        }, { session });
+        await this.database.collection('trashEvents').insertOne(trash(source), { session });
+        await this.database.collection<AuditRecord>('auditLogs').insertOne(
+          audit(source, target, productCount),
+          { session },
+        );
+        updatedCount = productCount;
+      });
+      return updatedCount;
+    } finally {
+      await session.endSession();
+    }
   }
 
   async defaultUnits(shopId: ObjectId, medicineIds: ObjectId[]): Promise<Map<string, CatalogRecord>> {

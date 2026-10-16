@@ -28,6 +28,7 @@ import { requireAuth, requirePermission, requireRole } from './auth-routes.js';
 import type { CatalogListOptions, CatalogRepository } from './catalog-repository.js';
 import type { TokenConfig } from './auth-crypto.js';
 import type { IdempotencyStore } from './idempotency.js';
+import { timezoneToday } from './business-time.js';
 
 const idSchema = z.string().regex(/^[a-f\d]{24}$/i);
 const medicineCreateSchema = medicineInputSchema.extend({
@@ -35,6 +36,7 @@ const medicineCreateSchema = medicineInputSchema.extend({
 }).strict();
 const namedUpdateSchema = namedRecordSchema.partial().strict();
 const supplierUpdateSchema = supplierSchema.partial().strict();
+const mergeSchema = z.object({ targetId: idSchema }).strict();
 
 type NamedResource = 'categories' | 'brands';
 
@@ -369,6 +371,84 @@ export function registerCatalogRoutes(
 
   registerNamedRoutes(app, repository, authRepository, tokenConfig, idempotencyStore, 'categories', 'categories');
   registerNamedRoutes(app, repository, authRepository, tokenConfig, idempotencyStore, 'brands', 'categories');
+
+  const masterDataPreHandler = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('categories')];
+  app.get('/api/master-data/overview', { preHandler: masterDataPreHandler }, async (request, reply) => {
+    const caller = requiredCaller(request, reply);
+    if (!caller) return;
+    const shop = await authRepository.findShopById(caller.shopId);
+    if (!shop || shop.status !== 'ACTIVE') return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+    let today: Date;
+    try {
+      today = timezoneToday(shop.timeZone ?? 'Asia/Karachi');
+    } catch {
+      request.log.error({ event: 'invalid_shop_timezone', shopId: caller.shopId.toHexString() });
+      return reply.code(500).send({ error: 'INTERNAL_ERROR' });
+    }
+    return reply.send(await repository.masterDataOverview(
+      caller.shopId,
+      today,
+      canViewCost(caller.role, caller.permissions),
+    ));
+  });
+
+  app.get('/api/master-data/units', { preHandler: masterDataPreHandler }, async (request, reply) => {
+    const caller = requiredCaller(request, reply);
+    if (!caller) return;
+    return reply.send({ items: await repository.listMasterUnits(caller.shopId) });
+  });
+
+  for (const collection of ['categories', 'brands'] as const) {
+    app.post(`/api/${collection}/:id/merge`, { preHandler: masterDataPreHandler }, async (request, reply) => {
+      const caller = requiredCaller(request, reply);
+      if (!caller) return;
+      const pathParsed = idSchema.safeParse((request.params as { id?: unknown }).id);
+      const bodyParsed = mergeSchema.safeParse(request.body);
+      if (!pathParsed.success || !bodyParsed.success) {
+        return reply.code(400).send({ error: 'VALIDATION_FAILED' });
+      }
+      const sourceId = objectId(pathParsed.data);
+      const targetId = objectId(bodyParsed.data.targetId);
+      try {
+        const productCount = await repository.mergeNamed(
+          collection,
+          caller.shopId,
+          sourceId,
+          targetId,
+          caller._id,
+          caller.role === 'admin' || caller.role === 'super_admin' || caller.permissions.includes('products'),
+          (source, target, count) => auditRecord(
+            caller,
+            `${collection === 'categories' ? 'category' : 'brand'}.merged`,
+            collection === 'categories' ? 'category' : 'brand',
+            sourceId,
+            snapshot(source),
+            { targetId: target._id.toHexString(), targetName: target.name, productCount: count },
+          ),
+          (source) => ({
+            shopId: caller.shopId,
+            actorId: caller._id,
+            entityId: source._id,
+            entityType: collection === 'categories' ? 'category' : 'brand',
+            action: 'deleted',
+            displayName: String(source.name),
+            role: caller.role,
+            occurredAt: new Date(),
+          }),
+        );
+        if (productCount === null) return reply.code(404).send({ error: 'NOT_FOUND' });
+        return reply.send({ productCount });
+      } catch (error) {
+        if (error instanceof Error && error.message === 'MERGE_TARGET_INVALID') {
+          return reply.code(400).send({ error: 'VALIDATION_FAILED' });
+        }
+        if (error instanceof Error && error.message === 'PRODUCTS_PERMISSION_REQUIRED') {
+          return reply.code(403).send({ error: 'FORBIDDEN' });
+        }
+        throw error;
+      }
+    });
+  }
 
   app.get('/api/suppliers', { preHandler: suppliersPreHandler }, async (request, reply) => {
     const caller = requiredCaller(request, reply);

@@ -187,6 +187,104 @@ test('categories, brands and suppliers validate, enforce per-shop names and use 
   }
 });
 
+test('master-data overview and units are shop-scoped; merge requires product permission when references change', async () => {
+  const { app, client, auth, catalog, shop, admin, cashier } = await setup();
+  try {
+    const category = await app.inject({
+      method: 'POST',
+      url: '/api/categories',
+      headers: headers(admin),
+      payload: { name: 'Source category' },
+    });
+    const target = await app.inject({
+      method: 'POST',
+      url: '/api/categories',
+      headers: headers(admin),
+      payload: { name: 'Target category' },
+    });
+    const brand = await app.inject({
+      method: 'POST',
+      url: '/api/brands',
+      headers: headers(admin),
+      payload: { name: 'Source manufacturer' },
+    });
+    const { id: medicineId } = await createMedicine(
+      app,
+      admin,
+      category.json().id as string,
+      brand.json().id as string,
+      'MASTER-001',
+    );
+
+    const overview = await app.inject({
+      method: 'GET',
+      url: '/api/master-data/overview',
+      headers: headers(cashier),
+    });
+    assert.equal(overview.statusCode, 200);
+    assert.equal(overview.json().categories.find((item: { id: string }) => item.id === category.json().id).product_count, 1);
+    assert.equal(overview.json().categories[0].stock_value_paisa, null);
+    assert.equal(JSON.stringify(overview.json()).includes('cost'), false);
+
+    const units = await app.inject({
+      method: 'GET',
+      url: '/api/master-data/units',
+      headers: headers(cashier),
+    });
+    assert.equal(units.statusCode, 200);
+    assert.equal(units.json().items.length, 1);
+    assert.equal('unitCostPaisa' in units.json().items[0], false);
+
+    const categoryOnly = auth.addUser(shop, {
+      username: 'category-only',
+      email: 'category-only@example.test',
+      role: 'manager',
+      permissions: ['categories'],
+    });
+    const deniedMerge = await app.inject({
+      method: 'POST',
+      url: `/api/categories/${category.json().id}/merge`,
+      headers: headers(categoryOnly),
+      payload: { targetId: target.json().id },
+    });
+    assert.equal(deniedMerge.statusCode, 403);
+
+    const unchangedMedicine = await app.inject({
+      method: 'GET',
+      url: `/api/medicines/${medicineId}`,
+      headers: headers(admin),
+    });
+    assert.equal(unchangedMedicine.json().categoryId, category.json().id);
+
+    const merged = await app.inject({
+      method: 'POST',
+      url: `/api/categories/${category.json().id}/merge`,
+      headers: headers(admin),
+      payload: { targetId: target.json().id },
+    });
+    assert.equal(merged.statusCode, 200);
+    assert.deepEqual(merged.json(), { productCount: 1 });
+    const updatedMedicine = await app.inject({
+      method: 'GET',
+      url: `/api/medicines/${medicineId}`,
+      headers: headers(admin),
+    });
+    assert.equal(updatedMedicine.json().categoryId, target.json().id);
+    assert.equal(catalog.trash.at(-1)?.displayName, 'Source category');
+
+    const invalidSelfMerge = await app.inject({
+      method: 'POST',
+      url: `/api/brands/${brand.json().id}/merge`,
+      headers: headers(admin),
+      payload: { targetId: brand.json().id },
+    });
+    assert.equal(invalidSelfMerge.statusCode, 400);
+  } finally {
+    await app.close();
+    await client.close();
+  }
+});
+
 test('medicine CRUD and units enforce valid references/defaults and scope data to the caller shop', async () => {
   const { app, client, auth, admin, cashier } = await setup();
   try {
