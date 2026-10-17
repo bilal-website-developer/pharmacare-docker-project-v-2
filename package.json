@@ -23,6 +23,7 @@
     "test:sales": "tsx --test src/data/sales.test.ts",
     "test:finance": "tsx --test src/data/finance.test.ts",
     "test:business-reports": "tsx --test src/data/businessReports.test.ts",
+    "test:products-api": "tsx --test src/data/products.test.ts",
     "test:customer-ledger": "tsx --test src/data/customerLedger.test.ts",
     "test:shop-settings": "tsx --test src/data/shopSettings.test.ts",
     "test:product-filters": "tsx --test src/components/inventory/productFilterLogic.test.ts",
@@ -44,7 +45,7 @@
     "test:manage-users-policy": "tsx --test supabase/functions/manage-users/policy.test.ts",
     "test:api-client": "tsx --test src/api/client.test.ts",
     "test:server": "npm --prefix server test",
-    "test": "npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:finance && npm run test:business-reports && npm run test:customer-ledger && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:master-data-api && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-requests-api && npm run test:manage-users-api && npm run test:sale-returns-api && npm run test:purchases-api && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:server"
+    "test": "npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:finance && npm run test:business-reports && npm run test:products-api && npm run test:customer-ledger && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:master-data-api && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-requests-api && npm run test:manage-users-api && npm run test:sale-returns-api && npm run test:purchases-api && npm run test:print-request-editor && npm run test:trash-bin && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:server"
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",

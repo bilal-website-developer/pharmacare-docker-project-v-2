@@ -299,6 +299,38 @@ test('medicine CRUD and units enforce valid references/defaults and scope data t
     assert.equal(units.json().total, 1);
     assert.equal(units.json().items[0].pricePaisa, '1250');
 
+    const assignBarcode = await app.inject({
+      method: 'PATCH',
+      url: `/api/medicines/${created.id}`,
+      headers: headers(admin),
+      payload: { barcode: '12345678' },
+    });
+    assert.equal(assignBarcode.statusCode, 200);
+    const clearBarcode = await app.inject({
+      method: 'PATCH',
+      url: `/api/medicines/${created.id}`,
+      headers: headers(admin),
+      payload: { barcode: null },
+    });
+    assert.equal(clearBarcode.statusCode, 200);
+    assert.equal(clearBarcode.json().barcode, null);
+
+    const setUnitBarcode = await app.inject({
+      method: 'PATCH',
+      url: `/api/medicine-units/${created.unitId}`,
+      headers: headers(admin),
+      payload: { barcode: '12345679' },
+    });
+    assert.equal(setUnitBarcode.statusCode, 200);
+    const clearUnitBarcode = await app.inject({
+      method: 'PATCH',
+      url: `/api/medicine-units/${created.unitId}`,
+      headers: headers(admin),
+      payload: { barcode: null },
+    });
+    assert.equal(clearUnitBarcode.statusCode, 200);
+    assert.equal(clearUnitBarcode.json().barcode, null);
+
     const removeDefault = await app.inject({
       method: 'DELETE',
       url: `/api/medicine-units/${created.unitId}`,
@@ -423,6 +455,7 @@ test('cashier DTOs and CSV exports omit cost fields while cost-authorized manage
     assert.equal(cashierList.statusCode, 200);
     const cashierMedicine = cashierList.json().items[0] as Record<string, unknown>;
     assert.equal(Object.keys(cashierMedicine).some((key) => key.toLowerCase().includes('cost')), false);
+    assert.equal('marginBasisPoints' in cashierMedicine, false);
 
     const managerList = await app.inject({
       method: 'GET',
@@ -431,6 +464,7 @@ test('cashier DTOs and CSV exports omit cost fields while cost-authorized manage
     });
     assert.equal(managerList.statusCode, 200);
     assert.equal(managerList.json().items[0].latestCostPaisa, '880');
+    assert.equal(managerList.json().items[0].marginBasisPoints, '2960');
 
     const cashierExport = await app.inject({
       method: 'GET',
@@ -468,11 +502,11 @@ test('CSV import validates rows, reports row numbers, and exports quoted product
     const validRow = [
       'CSV-1', '"Acetaminophen, 500"', 'Paracetamol', '500 mg', 'Analgesics',
       manufacturer, 'OTC', 'ROOM_TEMPERATURE', 'A1', '12', 'false', 'true',
-      'Tablet', '1', '1550', '',
+      'Tablet', '1', '1550', '', '12345678',
     ].join(',');
     const invalidRow = [
       'CSV-2', 'Bad row', 'Generic', '', 'Missing category', manufacturer,
-      'INVALID', 'ROOM_TEMPERATURE', '', '0', 'false', 'true', 'Tablet', '1', '100', '',
+      'INVALID', 'ROOM_TEMPERATURE', '', '0', 'false', 'true', 'Tablet', '1', '100', '', '',
     ].join(',');
     const response = await app.inject({
       method: 'POST',
@@ -486,6 +520,18 @@ test('CSV import validates rows, reports row numbers, and exports quoted product
     assert.equal(response.json().rowErrors[0].code, 'ROW_VALIDATION_FAILED');
     assert.ok(categoryId);
 
+    const importedMedicine = await app.inject({
+      method: 'GET',
+      url: '/api/medicines?search=CSV-1',
+      headers: headers(admin),
+    });
+    const importedUnit = await app.inject({
+      method: 'GET',
+      url: `/api/medicines/${importedMedicine.json().items[0].id}/units`,
+      headers: headers(admin),
+    });
+    assert.equal(importedUnit.json().items[0].barcode, '12345678');
+
     const exported = await app.inject({
       method: 'GET',
       url: '/api/products/export.csv',
@@ -493,6 +539,7 @@ test('CSV import validates rows, reports row numbers, and exports quoted product
     });
     assert.equal(exported.statusCode, 200);
     assert.ok(exported.body.includes('"Acetaminophen, 500"'));
+    assert.ok(exported.body.includes('unitBarcode'));
   } finally {
     await app.close();
     await client.close();

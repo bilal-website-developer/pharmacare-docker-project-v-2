@@ -46,7 +46,7 @@ export const medicineInputSchema = z.object({
   minStockAlert: z.number().int().min(0).max(2_147_483_647).default(0),
   requiresPrescription: z.boolean().default(false),
   isActive: z.boolean().default(true),
-  barcode: z.string().regex(/^\d{8,14}$/).optional(),
+  barcode: z.string().regex(/^\d{8,14}$/).nullable().optional(),
 }).strict();
 
 export const medicineUpdateSchema = medicineInputSchema.partial().extend({
@@ -59,7 +59,7 @@ export const medicineUnitInputSchema = z.object({
   conversionFactorBaseUnits: z.number().int().min(1).max(2_147_483_647),
   pricePaisa: paisaText,
   isDefaultSaleUnit: z.boolean(),
-  barcode: z.string().regex(/^\d{8,14}$/).optional(),
+  barcode: z.string().regex(/^\d{8,14}$/).nullable().optional(),
 }).strict();
 
 export const medicineUnitUpdateSchema = medicineUnitInputSchema.partial().strict();
@@ -111,6 +111,7 @@ export const csvMedicineRowSchema = z.object({
   conversionFactorBaseUnits: z.coerce.number().int().min(1).max(2_147_483_647),
   pricePaisa: paisaText,
   barcode: z.union([z.literal(''), z.string().regex(/^\d{8,14}$/)]).default(''),
+  unitBarcode: z.union([z.literal(''), z.string().regex(/^\d{8,14}$/)]).default(''),
 }).strict();
 
 export type CatalogRecord = Record<string, unknown> & {
@@ -238,4 +239,5 @@ export const CSV_HEADERS = [
   'conversionFactorBaseUnits',
   'pricePaisa',
   'barcode',
+  'unitBarcode',
 ] as const;

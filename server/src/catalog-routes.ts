@@ -111,7 +111,24 @@ function toDto(
     updatedAt: record.updatedAt.toISOString(),
   };
   if (record.deletedAt instanceof Date) dto.deletedAt = record.deletedAt.toISOString();
-  if (collection === 'medicines' && cost !== undefined) dto.latestCostPaisa = cost;
+  if (collection === 'medicines' && cost !== undefined) {
+    dto.latestCostPaisa = cost;
+    const price = record.defaultUnitPricePaisa;
+    const conversion = record.defaultUnitConversionFactor;
+    if (cost === null || price === undefined || conversion === undefined) {
+      dto.marginBasisPoints = null;
+    } else {
+      const pricePaisa = BigInt(String(price));
+      const conversionFactorNumber = Number(conversion);
+      if (!Number.isSafeInteger(conversionFactorNumber) || conversionFactorNumber < 1) {
+        throw new Error('Invalid medicine unit conversion factor.');
+      }
+      const conversionFactor = BigInt(conversionFactorNumber);
+      dto.marginBasisPoints = pricePaisa === 0n
+        ? null
+        : ((pricePaisa - BigInt(cost) * conversionFactor) * 10_000n / pricePaisa).toString();
+    }
+  }
   return dto;
 }
 
@@ -356,7 +373,7 @@ function csvBoolean(value: unknown): string {
   return value === true ? 'true' : 'false';
 }
 
-function exportCsvRow(record: CatalogRecord, latestCost?: string): string {
+function exportCsvRow(record: CatalogRecord, unitBarcode?: unknown, latestCost?: string): string {
   const fields: unknown[] = [
     record.code,
     record.name,
@@ -374,6 +391,7 @@ function exportCsvRow(record: CatalogRecord, latestCost?: string): string {
     record.defaultUnitConversionFactor,
     record.defaultUnitPricePaisa,
     record.barcode,
+    unitBarcode,
   ];
   if (latestCost !== undefined) fields.push(latestCost);
   return fields.map(escapeCsvCell).join(',');
@@ -994,6 +1012,7 @@ export function registerCatalogRoutes(
         conversionFactorBaseUnits: parsed.data.conversionFactorBaseUnits,
         pricePaisa: Long.fromString(parsed.data.pricePaisa),
         isDefaultSaleUnit: true,
+        ...(parsed.data.unitBarcode ? { barcode: parsed.data.unitBarcode } : {}),
       }, now);
       try {
         await repository.createMedicine(medicine, [unit], caller._id, [
@@ -1042,9 +1061,11 @@ export function registerCatalogRoutes(
       if (!today) return;
       costMap = await repository.latestCosts(caller.shopId, records.map((row) => row._id), today);
     }
+    const defaultUnits = await repository.defaultUnits(caller.shopId, records.map((row) => row._id));
     const header = [...CSV_HEADERS, ...(showCost ? ['latestCostPaisa'] : [])].map(escapeCsvCell).join(',');
     const lines = records.map((record) => exportCsvRow(
       record,
+      defaultUnits.get(record._id.toHexString())?.barcode,
       showCost ? costMap.get(record._id.toHexString()) : undefined,
     ));
     return reply

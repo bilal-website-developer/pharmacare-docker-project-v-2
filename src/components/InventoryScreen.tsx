@@ -2,6 +2,20 @@ import { FormEvent, Suspense, lazy, useCallback, useEffect, useRef, useState } f
 import {
   Barcode, Download, FileUp, Grid2X2, List, Pencil, Plus, Printer, RefreshCw, ScanLine, Search, X,
 } from 'lucide-react';
+import { getBackend } from '../api';
+import {
+  assignMissingProductBarcodes,
+  assignProductBarcode,
+  importProductRows,
+  loadAllProductsForExport,
+  loadLowStockProductIds,
+  loadProductCatalog,
+  loadProductDuplicateIdentities,
+  loadProductOptions,
+  saveProduct as saveProductApi,
+  updateProductFields,
+  type ProductCatalogQuery,
+} from '../data/products';
 import { usePermissions } from '../permissions';
 import type { LabelPrintItem } from './labels/LabelPrintDialog';
 import { BarcodeScannerTest } from './BarcodeScannerTest';
@@ -81,7 +95,7 @@ interface Medicine {
   units: MedicineUnit[];
   stock: number;
   latest_cost_paisa: number | null;
-  margin_percent: number | null;
+  margin_percent: number | string | null;
   nearest_expiry: string | null;
   mrp_paisa: number;
   default_unit_conversion: number;
@@ -128,7 +142,7 @@ interface ProductsOverviewStats {
   low_stock: number;
   out_of_stock: number;
   expiring_90: number;
-  stock_value_cost_paisa: number | null;
+  stock_value_cost_paisa: number | string | null;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -171,7 +185,9 @@ function isProductsOverviewStats(value: unknown): value is ProductsOverviewStats
     && typeof value.low_stock === 'number'
     && typeof value.out_of_stock === 'number'
     && typeof value.expiring_90 === 'number'
-    && (value.stock_value_cost_paisa === null || typeof value.stock_value_cost_paisa === 'number');
+    && (value.stock_value_cost_paisa === null
+      || typeof value.stock_value_cost_paisa === 'number'
+      || typeof value.stock_value_cost_paisa === 'string');
 }
 
 function messageFor(error: unknown, fallback: string) {
@@ -187,8 +203,11 @@ function isBarcodeFunctionMissing(error: unknown) {
     || (message.includes('assign_medicine_barcode') && /not found|does not exist|schema cache/i.test(message));
 }
 
-function money(paisa: number) {
-  return `Rs ${(paisa / 100).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function money(paisa: number | string) {
+  const amount = BigInt(paisa);
+  const rupees = amount / 100n;
+  const fraction = (amount % 100n).toString().padStart(2, '0');
+  return `Rs ${rupees.toLocaleString('en-PK')}.${fraction}`;
 }
 
 function csvCell(value: string | number | boolean | null | undefined) {
@@ -434,6 +453,13 @@ function ProductsCatalog({
   }, [initialSearch, initialLowStockOnly]);
 
   const loadOptions = useCallback(async () => {
+    if (getBackend() === 'api') {
+      const options = await loadProductOptions();
+      setCategories(options.categories);
+      setBrands(options.brands);
+      setOptionsError('');
+      return;
+    }
     const client = supabase;
     if (!client) throw new Error('Supabase is not configured.');
     const [categoryRows, brandRows] = await Promise.all([
@@ -446,6 +472,36 @@ function ProductsCatalog({
   }, []);
 
   const loadProducts = useCallback(async () => {
+    if (getBackend() === 'api') {
+      setLoading(true);
+      setError('');
+      try {
+        const result = await loadProductCatalog({
+          page,
+          pageSize: PAGE_SIZE,
+          search,
+          categoryId: categories.find((item) => item.name === categoryFilter)?.id,
+          brandId: brands.find((item) => item.name === brandFilter)?.id,
+          drugClass: classFilter || undefined,
+          active: activeFilter === 'active' ? 'true' : activeFilter === 'inactive' ? 'false' : 'all',
+          lowStockOnly,
+          sort: sortColumn,
+          order: sortDirection,
+        });
+        setMedicines(result.rows);
+        setTotalCount(result.total);
+        setCanViewCost(result.canViewCost);
+        setOverviewStats(result.stats);
+      } catch (caught) {
+        setError(messageFor(caught, 'Could not load products.'));
+        setMedicines([]);
+        setOverviewStats(null);
+        setCanViewCost(false);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     const client = supabase;
     if (!client) {
       setError('Supabase is not configured.');
@@ -513,7 +569,7 @@ function ProductsCatalog({
     } finally {
       setLoading(false);
     }
-  }, [activeFilter, brandFilter, categoryFilter, classFilter, lowStockOnly, page, search, sortColumn, sortDirection]);
+  }, [activeFilter, brandFilter, categories, categoryFilter, classFilter, lowStockOnly, page, search, sortColumn, sortDirection]);
 
   useEffect(() => {
     void loadOptions().catch((caught) => setOptionsError(messageFor(caught, 'Could not load categories and manufacturers.')));
@@ -618,7 +674,46 @@ function ProductsCatalog({
     p_page_size: pageSize,
   });
 
+  const productApiQuery = (requestedPage: number, pageSize: number): ProductCatalogQuery => ({
+    page: requestedPage,
+    pageSize,
+    search,
+    categoryId: categories.find((item) => item.name === categoryFilter)?.id,
+    brandId: brands.find((item) => item.name === brandFilter)?.id,
+    drugClass: classFilter || undefined,
+    active: activeFilter === 'active' ? 'true' : activeFilter === 'inactive' ? 'false' : 'all',
+    lowStockOnly,
+    sort: sortColumn,
+    order: sortDirection,
+  });
+
   const loadFilteredProductsForExport = async () => {
+    if (getBackend() === 'api') {
+      let products = await loadAllProductsForExport(productApiQuery(1, 200));
+      if (lowStockOnly) {
+        const lowStockIds = await loadLowStockProductIds();
+        products = products.filter((medicine) => lowStockIds.has(medicine.id));
+      }
+      const field = {
+        name: 'brand_name',
+        stock: 'stock',
+        expiry: 'nearest_expiry',
+        mrp: 'mrp_paisa',
+      }[sortColumn] as 'brand_name' | 'stock' | 'nearest_expiry' | 'mrp_paisa';
+      products.sort((left, right) => {
+        const leftValue = left[field];
+        const rightValue = right[field];
+        const compared = leftValue === null
+          ? (rightValue === null ? 0 : 1)
+          : rightValue === null
+            ? -1
+            : typeof leftValue === 'number' && typeof rightValue === 'number'
+              ? leftValue - rightValue
+              : String(leftValue).localeCompare(String(rightValue));
+        return (sortDirection === 'asc' ? compared : -compared) || left.id.localeCompare(right.id);
+      });
+      return products;
+    }
     const client = supabase;
     if (!client) throw new Error('Supabase is not configured.');
     const rows: Medicine[] = [];
@@ -731,7 +826,7 @@ function ProductsCatalog({
   };
 
   const prepareImportPreview = async (file: File) => {
-    if (!supabase) {
+    if (getBackend() !== 'api' && !supabase) {
       setNotice('Supabase is not configured.');
       return;
     }
@@ -740,8 +835,30 @@ function ProductsCatalog({
     try {
       const parsedRows = parseProductCsv(await file.text());
       if (parsedRows.length > 2000) throw new Error('CSV import is limited to 2000 product rows.');
+      if (getBackend() === 'api') {
+        const existing = await loadProductDuplicateIdentities();
+        const existingCategoryNames = new Set(categories.map((item) => item.name.trim().toLocaleLowerCase()));
+        const existingBrandNames = new Set(brands.map((item) => item.name.trim().toLocaleLowerCase()));
+        const preview = previewProductCsv(parsedRows, existing);
+        setSkippedLines([]);
+        setImportPreview(preview.map((row) => ({
+          ...row,
+          errors: [
+            ...row.errors,
+            ...(existingCategoryNames.has((row.values.category ?? '').trim().toLocaleLowerCase())
+              ? []
+              : ['Category must already exist in master data.']),
+            ...(existingBrandNames.has((row.values.company ?? '').trim().toLocaleLowerCase())
+              ? []
+              : ['Manufacturer must already exist in master data.']),
+          ],
+        })));
+        return;
+      }
       const localPreview = previewProductCsv(parsedRows, []);
-      const { data, error: previewError } = await supabase.rpc('products_import_preview', {
+      const client = supabase;
+      if (!client) throw new Error('Supabase is not configured.');
+      const { data, error: previewError } = await client.rpc('products_import_preview', {
         rows: localPreview.map(({ line, values }) => ({ ...values, line })),
       });
       if (previewError) throw previewError;
@@ -772,7 +889,7 @@ function ProductsCatalog({
   };
 
   const importProducts = async () => {
-    if (!supabase || !importPreview) return;
+    if ((getBackend() !== 'api' && !supabase) || !importPreview) return;
     const validRows = importPreview.filter((row) => !skippedLines.includes(row.line) && row.errors.length === 0);
     const rowsToSkip = importPreview.filter((row) => skippedLines.includes(row.line) || row.errors.length > 0)
       .map((row) => skippedLines.includes(row.line) && row.errors.length === 0
@@ -790,7 +907,27 @@ function ProductsCatalog({
     setImporting(true);
     setNotice('');
     try {
-      const { data, error: importError } = await supabase.rpc('products_bulk_import', {
+      if (getBackend() === 'api') {
+        const result = await importProductRows(validRows.map((row) => row.values));
+        const previewLineByImportLine = new Map(validRows.map((row, index) => [index + 2, row.line]));
+        const importFailures = result.rowErrors.flatMap((item) => {
+          const originalLine = previewLineByImportLine.get(item.line);
+          const row = validRows.find((candidate) => candidate.line === originalLine);
+          return row ? [{ ...row, errors: [`Import failed (${item.code}).`] }] : [];
+        });
+        const skipped = [...rowsToSkip, ...importFailures];
+        setSkippedRows(skipped);
+        dispatchStockChanged();
+        await loadProducts();
+        setSelectedIds([]);
+        setNotice(`Imported ${result.importedCount} product${result.importedCount === 1 ? '' : 's'}; skipped ${skipped.length} row${skipped.length === 1 ? '' : 's'}.`);
+        setImportPreview(null);
+        setSkippedLines([]);
+        return;
+      }
+      const client = supabase;
+      if (!client) throw new Error('Supabase is not configured.');
+      const { data, error: importError } = await client.rpc('products_bulk_import', {
         rows: validRows.map(({ line, values }) => ({ ...values, line })),
       });
       if (importError) throw importError;
@@ -812,11 +949,32 @@ function ProductsCatalog({
   };
 
   const applyBulkUpdate = async (action: 'category' | 'deactivate', value: string | null = null) => {
-    if (!supabase || selectedIds.length === 0) return;
+    if ((getBackend() !== 'api' && !supabase) || selectedIds.length === 0) return;
     setImporting(true);
     setNotice('');
     try {
-      const { data, error: updateError } = await supabase.rpc('products_bulk_update', {
+      if (getBackend() === 'api') {
+        const updates = action === 'deactivate'
+          ? { isActive: false }
+          : { categoryId: categories.find((item) => item.name === value)?.id };
+        if (action === 'category' && !updates.categoryId) {
+          throw new Error('Choose a valid category before updating products.');
+        }
+        const results = await Promise.allSettled(selectedIds.map((id) => updateProductFields(id, updates)));
+        const updated = results.filter((result) => result.status === 'fulfilled').length;
+        const failed = results.length - updated;
+        dispatchStockChanged();
+        setSelectedIds([]);
+        setConfirmBulkDeactivate(false);
+        setNotice(failed
+          ? `Updated ${updated} product${updated === 1 ? '' : 's'}; ${failed} could not be updated. Refresh and review the selection.`
+          : `Updated ${updated} product${updated === 1 ? '' : 's'}.`);
+        await loadProducts();
+        return;
+      }
+      const client = supabase;
+      if (!client) throw new Error('Supabase is not configured.');
+      const { data, error: updateError } = await client.rpc('products_bulk_update', {
         ids: selectedIds,
         action,
         value,
@@ -887,14 +1045,23 @@ function ProductsCatalog({
       setNotice('Products permission is required to make a barcode.');
       return;
     }
-    if (!supabase) {
+    if (getBackend() !== 'api' && !supabase) {
       setNotice('Supabase is not configured.');
       return;
     }
     setGeneratingBarcodeId(medicine.id);
     setNotice('');
     try {
-      const { data, error: barcodeError } = await supabase.rpc('assign_medicine_barcode', {
+      if (getBackend() === 'api') {
+        const barcode = await assignProductBarcode(medicine.id);
+        setNotice(`Generated barcode ${barcode} for ${medicine.brand_name}.`);
+        setViewingMedicine((current) => current?.id === medicine.id ? { ...current, barcode } : current);
+        await loadProducts();
+        return;
+      }
+      const client = supabase;
+      if (!client) throw new Error('Supabase is not configured.');
+      const { data, error: barcodeError } = await client.rpc('assign_medicine_barcode', {
         p_medicine_id: medicine.id,
         p_barcode: null,
         p_replace: false,
@@ -922,7 +1089,38 @@ function ProductsCatalog({
       setNotice('Products permission is required to make barcodes.');
       return;
     }
-    if (!supabase) {
+    if (getBackend() !== 'api' && !supabase) {
+      setNotice('Supabase is not configured.');
+      return;
+    }
+    if (getBackend() === 'api') {
+      setImporting(true);
+      setNotice('');
+      try {
+        if (selectedIds.length > 0) {
+          const results = await Promise.allSettled(selectedIds.map((id) => assignProductBarcode(id)));
+          const assigned = results.filter((result) => result.status === 'fulfilled').length;
+          const failed = results.length - assigned;
+          setNotice(`Generated ${assigned} barcode${assigned === 1 ? '' : 's'}; ${failed} failed.`);
+          setSelectedIds([]);
+        } else {
+          const result = await assignMissingProductBarcodes();
+          setNotice(
+            result.assigned || result.skipped || result.failed
+              ? `Generated ${result.assigned} barcode${result.assigned === 1 ? '' : 's'}; skipped ${result.skipped}; failed ${result.failed}.`
+              : 'No barcodes were generated.',
+          );
+        }
+        await loadProducts();
+      } catch (caught) {
+        setNotice(messageFor(caught, 'Could not generate missing product barcodes.'));
+      } finally {
+        setImporting(false);
+      }
+      return;
+    }
+    const client = supabase;
+    if (!client) {
       setNotice('Supabase is not configured.');
       return;
     }
@@ -936,7 +1134,7 @@ function ProductsCatalog({
     setImporting(true);
     setNotice('');
     try {
-      const { data, error: bulkError } = await supabase.rpc('assign_missing_barcodes', {
+      const { data, error: bulkError } = await client.rpc('assign_missing_barcodes', {
         p_medicine_ids: ids,
       });
       if (bulkError) {
@@ -993,7 +1191,7 @@ function ProductsCatalog({
 
   const saveProduct = async (event: FormEvent) => {
     event.preventDefault();
-    if (!supabase) return setNotice('Supabase is not configured.');
+    if (getBackend() !== 'api' && !supabase) return setNotice('Supabase is not configured.');
     const minStock = Number(form.min_stock_alert);
     const units = form.units.map((unit) => ({
       ...(unit.id ? { id: unit.id } : {}),
@@ -1018,7 +1216,46 @@ function ProductsCatalog({
     setSaving(true);
     setNotice('');
     try {
-      const { error: saveError } = await supabase.rpc('save_medicine', {
+      if (getBackend() === 'api') {
+        const categoryId = categories.find((item) => item.name === form.category)?.id;
+        const brandId = brands.find((item) => item.name === form.company)?.id;
+        if (!categoryId || !brandId) {
+          throw new Error('Choose an active category and manufacturer.');
+        }
+        await saveProductApi({
+          id: editing?.id ?? null,
+          code: form.code.trim(),
+          barcode: form.barcode.trim() || null,
+          name: form.brand_name.trim(),
+          genericName: form.generic_name.trim(),
+          strength: form.strength.trim() || null,
+          categoryId,
+          brandId,
+          drugClass: form.drug_class,
+          storageCondition: form.storage_condition,
+          rackLocation: form.rack_location.trim(),
+          minStockAlert: minStock,
+          requiresPrescription: form.requires_prescription,
+          isActive: editing?.is_active ?? true,
+          units: units.map((unit) => ({
+            ...(unit.id ? { id: unit.id } : {}),
+            name: unit.name,
+            conversionFactorBaseUnits: unit.conversion_factor,
+            isDefaultSaleUnit: unit.is_default_sale_unit,
+            pricePaisa: unit.price_paisa,
+            barcode: unit.barcode,
+          })),
+          existingUnitIds: editing?.units.map((unit) => unit.id) ?? [],
+        });
+        dispatchStockChanged();
+        setShowForm(false);
+        setNotice(editing ? 'Product updated.' : 'Product added.');
+        await loadProducts();
+        return;
+      }
+      const client = supabase;
+      if (!client) throw new Error('Supabase is not configured.');
+      const { error: saveError } = await client.rpc('save_medicine', {
         p_medicine_id: editing?.id ?? null,
         p_values: {
           code: form.code.trim(),
@@ -1050,14 +1287,24 @@ function ProductsCatalog({
   };
 
   const changeProductStatus = async (medicine: Medicine, active: boolean) => {
-    if (!supabase) {
+    if (getBackend() !== 'api' && !supabase) {
       setNotice('Supabase is not configured.');
       return;
     }
     setImporting(true);
     setNotice('');
     try {
-      const { error: updateError } = await supabase.rpc('products_bulk_update', {
+      if (getBackend() === 'api') {
+        await updateProductFields(medicine.id, { isActive: active });
+        dispatchStockChanged();
+        setPendingStatusChange(null);
+        setNotice(`${medicine.brand_name} ${active ? 'activated' : 'deactivated'}.`);
+        await loadProducts();
+        return;
+      }
+      const client = supabase;
+      if (!client) throw new Error('Supabase is not configured.');
+      const { error: updateError } = await client.rpc('products_bulk_update', {
         ids: [medicine.id],
         action: active ? 'activate' : 'deactivate',
         value: null,
@@ -1213,7 +1460,9 @@ function ProductsCatalog({
         initiallyHidden: false,
         render: (medicine: Medicine) => medicine.margin_percent === null
           ? '—'
-          : `${medicine.margin_percent.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`,
+          : `${typeof medicine.margin_percent === 'number'
+            ? medicine.margin_percent.toLocaleString(undefined, { maximumFractionDigits: 2 })
+            : medicine.margin_percent}%`,
       },
     ] : []),
   ];
@@ -1442,12 +1691,19 @@ function ProductsCatalog({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 id="product-import-title" className="text-lg font-black text-text">Review product CSV</h2>
-                <p className="text-sm text-muted">{importPreview.filter((row) => !row.errors.length && !skippedLines.includes(row.line)).length} ready of {importPreview.length} row(s). Valid rows import in one transaction.</p>
+                <p className="text-sm text-muted">
+                  {importPreview.filter((row) => !row.errors.length && !skippedLines.includes(row.line)).length} ready of {importPreview.length} row(s).
+                  {getBackend() === 'api'
+                    ? ' Valid rows are imported individually; row-level failures are reported.'
+                    : ' Valid rows import in one transaction.'}
+                </p>
               </div>
               <button type="button" className={SECONDARY} aria-label="Close import preview" onClick={() => setImportPreview(null)}><X size={16} /></button>
             </div>
             <p className="rounded-control border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-text">
-              Missing categories and manufacturers are created through the existing category/brand functions. Your account needs Categories permission if the import contains new values.
+              {getBackend() === 'api'
+                ? 'Categories and manufacturers must already exist in Master Data before importing. The import does not create reference data.'
+                : 'Missing categories and manufacturers are created through the existing category/brand functions. Your account needs Categories permission if the import contains new values.'}
             </p>
             <div className="max-h-[50vh] space-y-2 overflow-y-auto">
               {importPreview.map((row) => (
