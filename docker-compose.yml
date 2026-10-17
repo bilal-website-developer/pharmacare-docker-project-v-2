@@ -69,6 +69,8 @@ services:
       MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD is required}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
       REFRESH_TOKEN_PEPPER: ${REFRESH_TOKEN_PEPPER:?REFRESH_TOKEN_PEPPER is required}
+      SETUP_CODE_HASH: ${SETUP_CODE_HASH:-}
+      SETUP_CODE_EXPIRES_AT: ${SETUP_CODE_EXPIRES_AT:-}
     depends_on:
       mongo:
         condition: service_healthy
@@ -107,6 +109,8 @@ services:
       MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD is required}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
       REFRESH_TOKEN_PEPPER: ${REFRESH_TOKEN_PEPPER:?REFRESH_TOKEN_PEPPER is required}
+      SETUP_CODE_HASH: ${SETUP_CODE_HASH:-}
+      SETUP_CODE_EXPIRES_AT: ${SETUP_CODE_EXPIRES_AT:-}
     depends_on:
       mongo:
         condition: service_healthy

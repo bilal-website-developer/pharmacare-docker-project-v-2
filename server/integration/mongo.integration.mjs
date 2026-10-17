@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import Fastify from 'fastify';
 import test, { after, before } from 'node:test';
 import { Long, MongoClient, ObjectId } from 'mongodb';
 import { createAccessToken } from '../dist/auth-crypto.js';
@@ -9,6 +10,7 @@ import { loadConfig } from '../dist/config.js';
 import { MongoCatalogRepository } from '../dist/catalog-repository.js';
 import { MongoStockRepository } from '../dist/stock-repository.js';
 import { MongoSalesRepository } from '../dist/sales-repository.js';
+import { registerSetupRoutes } from '../dist/setup-routes.js';
 
 let client;
 let database;
@@ -908,7 +910,7 @@ test('Mongo expense, settings, print approval and sale void workflows persist wi
         shopId, sourceExpenseId: new ObjectId(expenseId),
       }).toArray();
       assert.equal(expenseEntries.length, 3);
-      const shiftedDay = movedExpenseDate.toISOString().slice(0, 10);
+      const shiftedDay = timezoneToday('Asia/Karachi', movedExpenseDate).toISOString().slice(0, 10);
       const shiftedCashBook = await app.inject({
         method: 'GET',
         url: `/api/cash-book?dateFrom=${shiftedDay}&dateTo=${shiftedDay}`,
@@ -1037,10 +1039,10 @@ test('Mongo expense, settings, print approval and sale void workflows persist wi
         { _id: actor._id, shopId },
         { $set: { role: actor.role, permissions: actor.permissions } },
       );
-      const permissionDeniedAuditLogs = await app.inject({
+      const adminRoleGrantedAuditLogs = await app.inject({
         method: 'GET', url: '/api/audit-logs', headers: headers(),
       });
-      assert.equal(permissionDeniedAuditLogs.statusCode, 403);
+      assert.equal(adminRoleGrantedAuditLogs.statusCode, 200, adminRoleGrantedAuditLogs.body);
       actor.permissions = [...rolePermissions];
       await database.collection('users').updateOne(
         { _id: actor._id, shopId },
@@ -1078,4 +1080,91 @@ test('Mongo expense, settings, print approval and sale void workflows persist wi
       await app.close();
     }
   });
+});
+
+test('Mongo first-run setup is one-time, password-protected, and concurrent-safe', { skip: !enabled }, async () => {
+  const suffix = randomUUID().replace(/-/g, '');
+  const collections = {
+    shops: `setupShops_${suffix}`,
+    users: `setupUsers_${suffix}`,
+    setupState: `setupState_${suffix}`,
+    auditLogs: `setupAudit_${suffix}`,
+  };
+  const setupCode = `${randomUUID()}${randomUUID()}`;
+  const setupConfig = {
+    ...config,
+    bootstrapShopSlug: `setup-${suffix}`,
+    setupCodeHash: createHash('sha256').update(setupCode).digest('hex'),
+    setupCodeExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  };
+  const app = Fastify({ logger: false });
+  registerSetupRoutes(app, client, setupConfig, collections);
+  await app.ready();
+  const payload = {
+    setupCode,
+    shopName: 'Fake Integration Pharmacy',
+    phone: '+920000000000',
+    address: 'Example Road',
+    timeZone: 'Asia/Karachi',
+    username: `setup-${suffix}`,
+    email: `${suffix}@example.test`,
+    fullName: 'Fake Setup Owner',
+    password: 'Strong-Setup-Password-47!',
+  };
+  try {
+    const initialStatus = await app.inject({ method: 'GET', url: '/api/setup/status' });
+    assert.deepEqual(initialStatus.json(), { needsSetup: true });
+
+    const wrongCode = await app.inject({
+      method: 'POST',
+      url: '/api/setup',
+      payload: { ...payload, setupCode: `${randomUUID()}${randomUUID()}` },
+    });
+    assert.equal(wrongCode.statusCode, 403);
+    const weakPassword = await app.inject({
+      method: 'POST',
+      url: '/api/setup',
+      payload: { ...payload, password: 'weak-password' },
+    });
+    assert.equal(weakPassword.statusCode, 400);
+
+    const concurrent = await Promise.all([
+      app.inject({ method: 'POST', url: '/api/setup', payload }),
+      app.inject({ method: 'POST', url: '/api/setup', payload }),
+    ]);
+    assert.deepEqual(concurrent.map((response) => response.statusCode).sort(), [201, 409]);
+    const created = concurrent.find((response) => response.statusCode === 201);
+    assert.deepEqual(created?.json(), { created: true });
+    assert.equal(await database.collection(collections.shops).countDocuments({}), 1);
+    assert.equal(await database.collection(collections.users).countDocuments({ role: 'super_admin' }), 1);
+    const createdShop = await database.collection(collections.shops).findOne({});
+    const createdUser = await database.collection(collections.users).findOne({});
+    assert.equal(createdShop.timeZone, 'Asia/Karachi');
+    assert.equal(createdShop.memoSettings.roundNet, 'none');
+    assert.match(createdUser.passwordHash, /^\$argon2id\$/);
+    assert.equal(await database.collection(collections.auditLogs).countDocuments({}), 2);
+
+    const afterSetupStatus = await app.inject({ method: 'GET', url: '/api/setup/status' });
+    assert.deepEqual(afterSetupStatus.json(), { needsSetup: false });
+    const secondSetup = await app.inject({ method: 'POST', url: '/api/setup', payload });
+    assert.equal(secondSetup.statusCode, 409);
+
+    const expiredApp = Fastify({ logger: false });
+    registerSetupRoutes(expiredApp, client, {
+      ...setupConfig,
+      setupCodeExpiresAt: new Date(Date.now() - 1000),
+    }, collections);
+    await expiredApp.ready();
+    try {
+      const expiredCode = await expiredApp.inject({ method: 'POST', url: '/api/setup', payload });
+      assert.equal(expiredCode.statusCode, 403);
+    } finally {
+      await expiredApp.close();
+    }
+  } finally {
+    await app.close();
+    await Promise.all(Object.values(collections).map((name) =>
+      database.collection(name).deleteMany({}),
+    ));
+  }
 });

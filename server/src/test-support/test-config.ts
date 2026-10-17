@@ -12,4 +12,6 @@ export const testConfig: AppConfig = {
   accessTokenTtlSeconds: 15 * 60,
   refreshTokenTtlSeconds: 7 * 24 * 60 * 60,
   bootstrapShopSlug: 'test-shop',
+  setupCodeHash: null,
+  setupCodeExpiresAt: null,
 };

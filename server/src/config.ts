@@ -14,6 +14,14 @@ const configSchema = z.object({
   JWT_ACCESS_SECRET: strongSecret(48),
   REFRESH_TOKEN_PEPPER: strongSecret(48),
   BOOTSTRAP_SHOP_SLUG: z.string().trim().min(1).max(63).regex(/^[a-zA-Z0-9-]+$/).default('main'),
+  SETUP_CODE_HASH: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
+  ),
+  SETUP_CODE_EXPIRES_AT: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().datetime({ offset: true }).optional(),
+  ),
 });
 
 export type AppConfig = {
@@ -28,6 +36,8 @@ export type AppConfig = {
   accessTokenTtlSeconds: number;
   refreshTokenTtlSeconds: number;
   bootstrapShopSlug: string;
+  setupCodeHash: string | null;
+  setupCodeExpiresAt: Date | null;
 };
 
 function encodeCredential(value: string): string {
@@ -88,5 +98,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     accessTokenTtlSeconds: 15 * 60,
     refreshTokenTtlSeconds: 7 * 24 * 60 * 60,
     bootstrapShopSlug: values.BOOTSTRAP_SHOP_SLUG.toLowerCase(),
+    setupCodeHash: values.SETUP_CODE_HASH?.toLowerCase() ?? null,
+    setupCodeExpiresAt: values.SETUP_CODE_EXPIRES_AT
+      ? new Date(values.SETUP_CODE_EXPIRES_AT)
+      : null,
   };
 }

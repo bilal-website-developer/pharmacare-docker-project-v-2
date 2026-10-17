@@ -48,6 +48,12 @@ Decisions recorded while finishing the migration. Revisit a decision only when n
 
 ## 2026-10-17
 
+### One-time first-run setup code
+
+- **Decision:** The setup API accepts a plaintext code only over the local setup form, compares its SHA-256 digest in constant time against `SETUP_CODE_HASH`, enforces `SETUP_CODE_EXPIRES_AT`, and atomically consumes a unique Mongo setup marker with the first shop/Super Admin transaction. The future installer generates and displays the code and must not log or persist its plaintext.
+- **Alternatives:** Leave bootstrap as CLI-only; store the plaintext code in Mongo; allow setup without a code on a private network.
+- **Reason:** Provide a guided shop-PC setup while retaining one-time use, bounded validity, and no stored plaintext bootstrap credential. The installer lifecycle and end-user experience remain to be implemented/tested.
+
 ### API security defaults
 
 - **Decision:** Allow one normalized `WEB_ORIGIN`; rate-limit by HMAC(IP, method, route, minute) with 120 reads, 60 writes, and 30 auth requests per window; retain the stricter login cap of 10 and five-failure account lockout. Persist general request counters in Mongo with TTL expiry. Test-mode apps use an injected rate-limit store so unit tests cannot unexpectedly access Mongo.

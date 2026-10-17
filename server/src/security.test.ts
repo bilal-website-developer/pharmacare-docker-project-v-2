@@ -99,6 +99,9 @@ const PUBLIC_ROUTE_PREFIXES = [
   'GET:/api/health',
   'HEAD:/api/health',
   'POST:/api/auth/login',
+  'GET:/api/setup/status',
+  'HEAD:/api/setup/status',
+  'POST:/api/setup',
 ];
 const AUTHENTICATED_SELF_SERVICE = new Set([
   'GET:/api/auth/me',
@@ -237,6 +240,13 @@ test('request limits cover all API routes and are stricter for auth and writes',
     assert.equal(response?.statusCode, 200);
     response = await app.inject({ method: 'POST', url: `${ROUTE_TEST_PREFIX}/write` });
     assert.equal(response.statusCode, 429);
+
+    for (let index = 0; index < 5; index += 1) {
+      response = await app.inject({ method: 'POST', url: '/api/setup', payload: {} });
+    }
+    assert.equal(response?.statusCode, 400);
+    response = await app.inject({ method: 'POST', url: '/api/setup', payload: {} });
+    assert.equal(response.statusCode, 429);
   } finally {
     await app.close();
     await client.close();
@@ -372,6 +382,7 @@ test('Pino redaction removes credentials, tokens, request keys, and error stacks
         newPassword: 'fixture-new-password',
         refreshToken: 'fixture-refresh',
         accessToken: 'fixture-access',
+        setupCode: 'fixture-setup-code',
       },
     },
     token: 'fixture-token',
@@ -381,6 +392,9 @@ test('Pino redaction removes credentials, tokens, request keys, and error stacks
     MONGO_REPLICA_KEY: 'fixture-mongo-replica-key',
     JWT_ACCESS_SECRET: 'fixture-jwt-access-secret',
     REFRESH_TOKEN_PEPPER: 'fixture-refresh-pepper',
+    SETUP_CODE_HASH: 'fixture-setup-code-hash',
+    SETUP_CODE_EXPIRES_AT: 'fixture-setup-code-expiry',
+    setupCode: 'fixture-setup-code-top-level',
     mongoUri: 'fixture-mongo-uri',
     accessTokenSecret: 'fixture-access-token-secret',
     refreshTokenPepper: 'fixture-refresh-token-pepper',
@@ -408,6 +422,10 @@ test('Pino redaction removes credentials, tokens, request keys, and error stacks
     'fixture-mongo-uri',
     'fixture-access-token-secret',
     'fixture-refresh-token-pepper',
+    'fixture-setup-code',
+    'fixture-setup-code-hash',
+    'fixture-setup-code-expiry',
+    'fixture-setup-code-top-level',
     'fixture-error-message',
     'fixture-error-stack',
   ]) {

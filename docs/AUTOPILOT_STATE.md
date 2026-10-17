@@ -2,67 +2,34 @@
 
 ## Current position
 
-> Latest status: Step 0 committed as `e7dce1e`. Phase 7 audit-log endpoint is implemented and its lint, build, root tests, and real-Mongo integration checks passed; Phase 7 documentation and code are awaiting their dedicated commit. Continue with Phase 8 checks next. See the session update below for exact evidence. The older kickoff entries below are historical.
+> Current position: first-run setup wizard and API bootstrap routes have been implemented locally but are not yet committed. Phase 7 and Phase 8 implementation changes are committed; browser/manual acceptance remains outstanding. Continue with catalog seed, shop installer/release workflow, backup/restore, production packaging, demo/manual tests, and cutover preparation.
 
-- Step 0 — housekeeping: complete locally; awaiting its documentation/attribute commit. Worktree was clean on `feature/mongo-migration`; the branch is 29 commits ahead of `origin/feature/mongo-migration`. No earlier uncommitted batch was available to commit.
-- Step 0 — housekeeping: committed as `e7dce1e`.
-- Phase 7 completion audit: added admin-only `GET /api/audit-logs`, role/permission checks, shop-scoped date/event paging, and an allowlisted projection; pending commit.
-- Phase 8 follow-up is next after the Phase 7 commit.
-- Docker engine is available (`docker version --format '{{.Server.Version}}'` returned `29.8.0`).
-- Current source/docs record Phases 0–9 as implemented or locally checked, with Phase 7 implemented, Phase 8 API adapters present, and Phases 10–12 open. This session must re-run checks before claiming current verification.
-- Supabase files and live services remain out of scope; no data or volumes have been deleted.
+- Branch: `feature/mongo-migration`.
+- Recent commits: `e7dce1e` housekeeping, `9d3f0bb` admin audit-log endpoint, `d661142` API-unavailable retry screen.
+- Current worktree contains first-run setup changes plus test-only fixes to use the shop-local date in an expense assertion and to reflect the admin role's effective module permissions.
+- No `.env` values were read or printed. No Supabase files, volumes, remote branches, or live services were changed.
 
-## Completed
+## Current verification evidence
 
-- Read `docs/PROJECT_CONTEXT.md`, `docs/MONGO_MIGRATION.md`, `docs/MONGO_DESIGN.md`, and `docs/MONGO_MIGRATION_INVENTORY.md`.
-- Read `docs/MONGO_DECISIONS.md` and `docs/OWNER_STEPS.md`.
-- Confirmed current branch and clean worktree; latest commit is `935d94d`.
-- Confirmed `src/App.tsx` contains API-mode wiring and `vite.config.ts` plus `docs/DOCKER.md` use the documented Compose `:3000` default / host `:3001` override.
-- Added `.gitattributes` rules for LF `.sh` and CRLF `.ps1`.
-- `npm.cmd run lint`: exit 0.
-- `npm.cmd test`: 264 tests, 253 passed, 0 failed, 11 skipped (Mongo integration cases are skipped by the root runner).
-- `npm.cmd run build`: exit 0; existing Vite `__dirname` and large-chunk warnings remain.
-- `npm.cmd --prefix server run test:security`: 9 passed, 0 failed, 0 skipped.
-- `docker compose run --rm --no-deps api-test`: 11 real-Mongo tests passed, 0 failed, 0 skipped.
+| Command | Result |
+|---|---|
+| `docker compose run --build --rm --no-deps api-test` | 12 passed, 0 failed, 0 skipped |
+| `npm.cmd test` | 269 total, 257 passed, 0 failed, 12 skipped |
+| `npm.cmd run lint` | Exit 0 |
+| `npm.cmd run build` | Exit 0; existing Vite `__dirname` and chunk-size warnings |
+| `npm.cmd --prefix server run test:security` | 9 passed, 0 failed, 0 skipped |
 
-## Next actions
+The root test runner intentionally skips real-Mongo cases, which are exercised by the Compose test runner. The Compose suite includes one-time/concurrent setup, expiry and wrong-code rejection, password policy, Argon2id persistence, created defaults, and audit events. This is local verification, not shop-PC or production acceptance.
 
-1. Run baseline lint, complete root tests, build, server security tests, and the Compose Mongo integration suite.
-2. Inspect Phase 7 route coverage and Phase 8 API-mode checklist against current source; implement only demonstrable gaps.
-3. Continue the setup/catalog, security, installer/backup, demo/manual-plan, and cutover-preparation steps from the supplied autopilot task.
-4. Update this file and the migration/context documentation after each completed step; commit only each step's files and show its stat.
+## Open risks and next work
 
-## Verification log
-
-| Command | Passed | Failed | Skipped | Result |
-|---|---:|---:|---:|---|
-| `npm.cmd run lint` | n/a | n/a | n/a | Exit 0 |
-| `npm.cmd test` | 253 | 0 | 11 | 264 total |
-| `npm.cmd run build` | n/a | n/a | n/a | Exit 0 |
-| `npm.cmd --prefix server run test:security` | 9 | 0 | 0 | Passed |
-| `docker compose run --rm --no-deps api-test` | 11 | 0 | 0 | Passed against local Mongo replica set |
-
-## Open risks
-
-- No first-run setup wizard, setup-code lifecycle, starter catalog import workflow, shop installer/offline release pipeline, production Compose, backup/restore rehearsal, demo-mode acceptance, or cutover checklist has been verified in this session.
-- Browser/manual printer and scanner acceptance and production/independent security testing remain owner-pending.
+- Finish and commit the current setup batch after updating migration/context/owner documentation.
+- The setup wizard currently requires `SETUP_CODE_HASH` and `SETUP_CODE_EXPIRES_AT`; an installer that generates and displays a one-time code is still required.
+- Starter catalog import, offline shop installer/release and uninstaller/update/restore scripts, scheduled backup/restore rehearsal, production Compose/TLS deployment docs, demo seed/manual role plan, and Phase 12 cutover checklist remain open.
+- Manual browser, LAN, printer/scanner, production, independent security, and legal acceptance remain owner-pending. Do not claim these are verified.
 
 ## Decisions
 
-- Preserve existing product behavior and the legacy Supabase path until Phase 12; no destructive data or volume action is allowed.
-- Treat previous documentation as historical evidence only; record new verification only from commands executed in this session.
-
-## Session update — Phase 7 completion audit
-
-- Step 0 was committed as `e7dce1e`; it is no longer pending.
-- Added `/api/audit-logs`, protected by admin/super-admin role and `manage_users` permission. Query filtering is shop-scoped and date-filtered in the shop timezone. Only event/entity/actor identifiers and timestamp are projected; raw `before`/`after` fields are excluded.
-- Current verification: root tests 264 total (253 passed, 0 failed, 11 skipped), lint and build exit 0, security suite 9/9, Compose Mongo suite 11/11.
-- The Compose integration suite additionally proves manager-role denial, missing-permission denial, foreign-shop exclusion, and audit DTO omission of raw before/after content.
-- Phase 7 change is awaiting its dedicated commit. Next: continue Phase 8 source checklist, then setup, installer/backup, demo/manual and cutover-preparation work.
-
-## Session update — Phase 8 backend-unavailable retry
-
-- The API client dispatches an unavailable event on transport failure and HTTP 502/503/504; API mode renders a themed retry screen that attempts session restoration. Supabase behavior is unchanged.
-- `npm.cmd run test:api-client`: 6 passed, 0 failed, 0 skipped. `npm.cmd run lint` and `npm.cmd run build` exited 0. Browser/shop-PC recovery remains unverified.
-- Phase 7 audit-log changes were committed as `9d3f0bb`.
-- Next: inspect the remaining Phase 8 checklist for concrete API-mode gaps, then implement the first-run setup and seed catalog workflow.
+- Preserve the Supabase implementation until Phase 12 preparation is complete and explicit cut-over approval is given.
+- Each run's verification must be recorded from current-session command output; skipped tests are not passes.
+- The first-run route consumes a one-time setup marker transactionally and accepts only a hash-configured, expiring setup code. The future installer owns code generation/display and must never log or persist the plaintext code.

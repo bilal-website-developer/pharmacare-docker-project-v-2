@@ -7,6 +7,7 @@ export const REQUEST_RATE_LIMIT = 120;
 export const AUTH_RATE_LIMIT = 30;
 export const WRITE_RATE_LIMIT = 60;
 export const LOGIN_RATE_LIMIT = 10;
+export const SETUP_RATE_LIMIT = 5;
 
 export const LOGGER_REDACT_PATHS = [
   'req.headers.authorization',
@@ -20,15 +21,20 @@ export const LOGGER_REDACT_PATHS = [
   'req.body.refreshToken',
   'req.body.accessToken',
   'req.body.secret',
+  'req.body.setupCode',
   'req.body.key',
   'MONGO_APP_PASSWORD',
   'MONGO_ROOT_PASSWORD',
   'MONGO_REPLICA_KEY',
   'JWT_ACCESS_SECRET',
   'REFRESH_TOKEN_PEPPER',
+  'SETUP_CODE_HASH',
+  'SETUP_CODE_EXPIRES_AT',
   'mongoUri',
   'accessTokenSecret',
   'refreshTokenPepper',
+  'setupCodeHash',
+  'setupCode',
   'passwordHash',
   'token',
   'accessToken',
@@ -44,9 +50,13 @@ export const LOGGER_REDACT_PATHS = [
   '*.MONGO_REPLICA_KEY',
   '*.JWT_ACCESS_SECRET',
   '*.REFRESH_TOKEN_PEPPER',
+  '*.SETUP_CODE_HASH',
+  '*.SETUP_CODE_EXPIRES_AT',
   '*.mongoUri',
   '*.accessTokenSecret',
   '*.refreshTokenPepper',
+  '*.setupCodeHash',
+  '*.setupCode',
   '*.token',
   '*.accessToken',
   '*.refreshToken',
@@ -137,7 +147,10 @@ export function requestRateLimit(
     .digest('hex');
   const expiresAt = new Date((window + 2) * REQUEST_RATE_WINDOW_MS);
   const isAuth = route.startsWith('/api/auth/');
-  const limit = isAuth
+  const isSetup = route === '/api/setup';
+  const limit = isSetup
+    ? SETUP_RATE_LIMIT
+    : isAuth
     ? AUTH_RATE_LIMIT
     : ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
       ? WRITE_RATE_LIMIT

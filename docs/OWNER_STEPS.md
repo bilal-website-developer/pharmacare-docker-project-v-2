@@ -1,14 +1,15 @@
-# Owner-operated bootstrap steps
+# Owner-operated setup and outstanding installer handoff
 
-These commands run from PowerShell in `E:\PHARMCYYYY`. They use the existing ignored `.env`; do not display or paste its contents.
+The first-run setup API and wizard are implemented, but the shop installer that provisions `SETUP_CODE_HASH` and `SETUP_CODE_EXPIRES_AT` and displays the corresponding one-time plaintext code is not yet implemented. Until that installer is delivered and tested, this is not a complete shop-PC setup procedure. Do not paste setup codes, passwords, `.env` contents, or tokens into chat.
+
+After an approved installer has provisioned the code and expiry in the ignored `.env`, launch the local services from PowerShell:
 
 ```powershell
 Set-Location E:\PHARMCYYYY
 docker compose up --detach api web
 docker compose ps
-npm run seed:superadmin
 ```
 
-The seed command creates the first shop and its first `super_admin` together if the shop slug does not exist. In the interactive terminal, enter the desired shop slug, shop name, username, email, and full name. Type the password and confirmation only at the hidden prompts. The password is not echoed; it is stored only as an Argon2id hash. Do not paste credentials into chat or save them in command history.
+Open the local web app. If Mongo has no shop, the wizard asks for pharmacy identity, time zone, and the first Super Admin details. Enter the one-time code displayed by the installer in the wizard. The password is sent only to the API over the local service path and stored as an Argon2id hash. The code expires and the API rejects subsequent setup attempts. Do not save credentials in command history.
 
-The command refuses to create a second bootstrap user in a shop that already has users. If the command reports that the shop already has users, stop and use the normal authenticated Manage Users workflow instead. Do not delete a Mongo volume or reset credentials to bypass this guard.
+The interactive `npm run seed:superadmin` CLI remains available for controlled owner-operated bootstrap when needed. It creates the initial shop and Super Admin; enter the password only at its hidden prompt. Do not run the CLI after the setup wizard has already created the shop, and do not delete a Mongo volume or reset credentials to bypass a setup guard.

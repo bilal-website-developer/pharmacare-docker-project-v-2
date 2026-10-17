@@ -67,3 +67,23 @@ test('normalizes a valid web origin and rejects origins with paths or credential
     /WEB_ORIGIN/,
   );
 });
+
+test('accepts only a SHA-256 setup-code hash and an offset-aware expiry', () => {
+  const setup = loadConfig({
+    ...validEnv,
+    SETUP_CODE_HASH: 'a'.repeat(64),
+    SETUP_CODE_EXPIRES_AT: '2030-01-01T00:00:00.000Z',
+  });
+  assert.equal(setup.setupCodeHash, 'a'.repeat(64));
+  assert.equal(setup.setupCodeExpiresAt?.toISOString(), '2030-01-01T00:00:00.000Z');
+  assert.equal(loadConfig(validEnv).setupCodeHash, null);
+
+  assert.throws(
+    () => loadConfig({ ...validEnv, SETUP_CODE_HASH: 'not-a-hash' }),
+    /SETUP_CODE_HASH/,
+  );
+  assert.throws(
+    () => loadConfig({ ...validEnv, SETUP_CODE_EXPIRES_AT: 'not-a-date' }),
+    /SETUP_CODE_EXPIRES_AT/,
+  );
+});

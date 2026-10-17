@@ -30,6 +30,7 @@ import {
 import { MongoSalesRepository, type SalesRepository } from './sales-repository.js';
 import { registerSalesRoutes } from './sales-routes.js';
 import { registerPhaseSevenRoutes } from './phase7-routes.js';
+import { registerSetupRoutes } from './setup-routes.js';
 
 export interface RegisteredApiRoute {
   method: string;
@@ -212,6 +213,7 @@ export function createApp(
       refreshTokenTtlSeconds: config.refreshTokenTtlSeconds,
     };
     if (!resolvedIdempotencyStore) throw new Error('Idempotency store is not configured');
+    registerSetupRoutes(app, mongoClient, config);
     registerAuthRoutes(app, pharmacyRepository, tokenConfig, resolvedIdempotencyStore);
     registerUserRoutes(app, pharmacyRepository, tokenConfig, resolvedIdempotencyStore);
     registerCatalogRoutes(

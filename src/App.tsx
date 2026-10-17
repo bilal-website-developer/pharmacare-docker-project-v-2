@@ -21,6 +21,7 @@ import { TopNav } from './components/TopNav';
 import { DashboardView } from './components/DashboardView';
 import { LoginView } from './components/LoginView';
 import { BackendUnavailableView } from './components/BackendUnavailableView';
+import { FirstRunSetupView } from './components/FirstRunSetupView';
 import type { ProductFilter } from './components/InventoryScreen';
 import { AuthSession, refreshAuthSession, restoreAuthSession, signOut } from './utils/auth';
 import { getBackend, isUnauthenticatedApiError } from './api';
@@ -53,6 +54,7 @@ import { loadPendingPrintCount } from './data/printRequests';
 import PharmaLogo from './components/PharmaLogo';
 import type { PrintReceiptHandler } from './utils/printWorkflow';
 import { STOCK_CHANGED_EVENT } from './utils/stockAlertsEvents';
+import { loadSetupStatus } from './data/setup';
 
 const POSBillingView = lazy(() => import('./components/POSBillingView').then(({ POSBillingView: View }) => ({ default: View })));
 const InventoryScreen = lazy(() => import('./components/InventoryScreen').then(({ InventoryScreen: View }) => ({ default: View })));
@@ -102,10 +104,19 @@ function routeToNavItem(pathname: string): NavItemKey | null {
   return match ? (match[0] as NavItemKey) : null;
 }
 
+async function restoreAppState(): Promise<{ needsSetup: boolean; session: AuthSession | null }> {
+  if (getBackend() === 'api') {
+    const status = await loadSetupStatus();
+    if (status.needsSetup) return { needsSetup: true, session: null };
+  }
+  return { needsSetup: false, session: await restoreAuthSession() };
+}
+
 export default function App() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [authMessage, setAuthMessage] = useState('');
+  const [needsSetup, setNeedsSetup] = useState(false);
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [retryingApi, setRetryingApi] = useState(false);
 
@@ -126,9 +137,12 @@ export default function App() {
         setSessionChecked(true);
       }
     });
-    void restoreAuthSession()
-      .then((profile) => {
-        if (!disposed) setSession(profile);
+    void restoreAppState()
+      .then((state) => {
+        if (!disposed) {
+          setNeedsSetup(state.needsSetup);
+          setSession(state.session);
+        }
       })
       .catch((error: unknown) => {
         if (!disposed) {
@@ -152,11 +166,12 @@ export default function App() {
   const retryApiConnection = async () => {
     setRetryingApi(true);
     try {
-      const profile = await restoreAuthSession();
-      setSession(profile);
+      const state = await restoreAppState();
+      setNeedsSetup(state.needsSetup);
+      setSession(state.session);
       setAuthMessage('');
       setApiUnavailable(false);
-      if (!profile) window.history.replaceState({}, '', '/login');
+      if (!state.needsSetup && !state.session) window.history.replaceState({}, '', '/login');
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : 'Could not reconnect to the application server.');
     } finally {
@@ -227,6 +242,12 @@ export default function App() {
     window.history.replaceState({}, '', '/');
   };
 
+  const handleSetupComplete = () => {
+    setNeedsSetup(false);
+    setAuthMessage('Setup complete. Sign in with your new Super Admin account.');
+    window.history.replaceState({}, '', '/login');
+  };
+
   const handleLogout = async () => {
     try {
       await signOut();
@@ -247,6 +268,7 @@ export default function App() {
   }
 
   if (!session) {
+    if (needsSetup) return <FirstRunSetupView onComplete={handleSetupComplete} />;
     if (window.location.pathname !== '/login') window.history.replaceState({}, '', '/login');
     return (
       <LoginView
