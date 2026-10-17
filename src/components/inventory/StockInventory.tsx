@@ -2,9 +2,23 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Download, FileSpreadsheet, History, RefreshCw, Search, SlidersHorizontal, X,
 } from 'lucide-react';
+import { getBackend } from '../../api';
 import { supabase } from '../../utils/supabase';
 import { getSupabaseErrorMessage } from '../../utils/supabaseError';
 import { dispatchStockChanged } from '../../utils/stockAlertsEvents';
+import {
+  adjustStockBatch,
+  listStockAdjustments,
+  listStockBatches,
+  loadStockExpiryBuckets,
+  loadStockOverview,
+  writeOffExpiredBatch,
+  type StockInventoryBatch as StockBatchRow,
+  type StockInventoryExpiryBucket as StockExpiryBucket,
+  type StockInventoryList as StockListResponse,
+  type StockInventoryMovements as StockMovementsResponse,
+  type StockInventoryStats as StockOverviewStats,
+} from '../../data/stockInventory';
 import {
   ConfirmDialog, DataTable, EmptyState, ExpiryChip, FilterChip, KpiCard, SegmentedTabs,
   Skeleton, StockBar, StatusChip,
@@ -27,71 +41,8 @@ type StockSort = 'medicine_asc' | 'medicine_desc' | 'batch_asc' | 'batch_desc' |
   | 'quantity_asc' | 'quantity_desc' | 'cost_asc' | 'cost_desc' | 'value_asc' | 'value_desc';
 type ExpiryBucketKey = 'expired' | '0-30' | '31-60' | '61-90' | '90+';
 
-interface StockBatchRow {
-  id: string;
-  medicine_id: string;
-  medicine_name: string;
-  generic_name: string;
-  code: string;
-  batch_number: string;
-  expiry_date: string;
-  received_date: string;
-  quantity_remaining: number;
-  status: string;
-  min_stock_alert: number;
-  cost_paisa_per_base_unit: number | null;
-  mrp_paisa_per_base_unit: number;
-  stock_value_cost_paisa: number | null;
-  is_sellable: boolean;
-}
-
-interface StockListResponse {
-  rows: StockBatchRow[];
-  total_count: number;
-  page: number;
-  page_size: number;
-  can_view_cost: boolean;
-}
-
-interface StockOverviewStats {
-  stock_value_cost_paisa: number | null;
-  stock_value_mrp_paisa: number;
-  expiring_30: number;
-  expired_batches: number;
-  expired_value_at_risk_paisa: number | null;
-}
-
-interface StockExpiryBucket {
-  key: ExpiryBucketKey;
-  label: string;
-  count: number;
-  quantity_remaining: number;
-}
-
-interface StockExpiryBucketsResponse {
-  buckets: StockExpiryBucket[];
-}
-
-interface StockMovementRow {
-  id: string;
-  batch_id: string;
-  batch_number: string;
-  medicine_id: string;
-  medicine_name: string;
-  generic_name: string;
-  movement_type: string;
-  quantity_delta: number;
-  reason: string;
-  created_at: string;
-  actor_name: string;
-}
-
-interface StockMovementsResponse {
-  rows: StockMovementRow[];
-  total_count: number;
-  page: number;
-  page_size: number;
-}
+type StockMovementRow = StockInventoryMovements['rows'][number];
+type StockExpiryBucketsResponse = { buckets: StockExpiryBucket[] };
 
 const BATCH_TABS: readonly { label: string; value: BatchTab }[] = [
   { label: 'All batches', value: 'all' },
@@ -117,8 +68,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isNullableNumber(value: unknown): value is number | null {
-  return value === null || typeof value === 'number';
+function isPaisaValue(value: unknown): value is string | number | null {
+  return value === null
+    || (typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value))
+    || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
 }
 
 function isStockBatchRow(value: unknown): value is StockBatchRow {
@@ -134,9 +87,9 @@ function isStockBatchRow(value: unknown): value is StockBatchRow {
     && typeof value.quantity_remaining === 'number'
     && typeof value.status === 'string'
     && typeof value.min_stock_alert === 'number'
-    && isNullableNumber(value.cost_paisa_per_base_unit)
-    && typeof value.mrp_paisa_per_base_unit === 'number'
-    && isNullableNumber(value.stock_value_cost_paisa)
+    && isPaisaValue(value.cost_paisa_per_base_unit)
+    && isPaisaValue(value.mrp_paisa_per_base_unit)
+    && isPaisaValue(value.stock_value_cost_paisa)
     && typeof value.is_sellable === 'boolean';
 }
 
@@ -152,11 +105,11 @@ function isStockListResponse(value: unknown): value is StockListResponse {
 
 function isStockOverviewStats(value: unknown): value is StockOverviewStats {
   return isRecord(value)
-    && isNullableNumber(value.stock_value_cost_paisa)
-    && typeof value.stock_value_mrp_paisa === 'number'
+    && isPaisaValue(value.stock_value_cost_paisa)
+    && isPaisaValue(value.stock_value_mrp_paisa)
     && typeof value.expiring_30 === 'number'
     && typeof value.expired_batches === 'number'
-    && isNullableNumber(value.expired_value_at_risk_paisa);
+    && isPaisaValue(value.expired_value_at_risk_paisa);
 }
 
 function isStockExpiryBucketsResponse(value: unknown): value is StockExpiryBucketsResponse {
@@ -204,8 +157,11 @@ async function readRpc<T>(
   return data;
 }
 
-function money(paisa: number) {
-  return `Rs ${(paisa / 100).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function money(paisa: number | string) {
+  const amount = BigInt(paisa);
+  const rupees = amount / 100n;
+  const cents = String(amount % 100n).padStart(2, '0');
+  return `Rs ${rupees.toLocaleString('en-PK')}.${cents}`;
 }
 
 function csvCell(value: string | number) {
@@ -217,6 +173,7 @@ function dateStamp() {
 }
 
 function stockErrorMessage(error: unknown, fallback: string) {
+  if (getBackend() === 'api' && error instanceof Error) return error.message;
   return getSupabaseErrorMessage(error, fallback);
 }
 
@@ -324,8 +281,9 @@ export function StockInventory({
 
   const load = useCallback(async () => {
     const client = supabase;
+    const apiMode = getBackend() === 'api';
     const sequence = ++loadSequence.current;
-    if (!client) {
+    if (!apiMode && !client) {
       setError('Supabase is not configured.');
       setLoading(false);
       return;
@@ -334,8 +292,7 @@ export function StockInventory({
     setError('');
     try {
       const activeBatchTab: BatchTab = tab === 'adjustment-log' ? 'all' : tab;
-      const batchResultPromise = readRpc(
-        client.rpc('stock_batches_list', stockListArgs({
+      const batchQuery = {
           tab: activeBatchTab,
           search: appliedSearch,
           sort,
@@ -343,22 +300,22 @@ export function StockInventory({
           pageSize: PAGE_SIZE,
           medicineId: initialMedicineId,
           expiryBucket,
-        })),
-        isStockListResponse,
-        'stock_batches_list',
-      );
-      const statsPromise = readRpc(
-        client.rpc('stock_overview_stats'),
-        isStockOverviewStats,
-        'stock_overview_stats',
-      );
-      const bucketsPromise = readRpc(
-        client.rpc('stock_expiry_buckets'),
-        isStockExpiryBucketsResponse,
-        'stock_expiry_buckets',
-      );
-      const countPromises = BATCH_TABS.map(({ value }) => readRpc(
-        client.rpc('stock_batches_list', stockListArgs({
+        };
+      const batchResultPromise = apiMode
+        ? listStockBatches(batchQuery)
+        : readRpc(
+          client!.rpc('stock_batches_list', stockListArgs(batchQuery)),
+          isStockListResponse,
+          'stock_batches_list',
+        );
+      const statsPromise = apiMode
+        ? loadStockOverview()
+        : readRpc(client!.rpc('stock_overview_stats'), isStockOverviewStats, 'stock_overview_stats');
+      const bucketsPromise = apiMode
+        ? loadStockExpiryBuckets()
+        : readRpc(client!.rpc('stock_expiry_buckets'), isStockExpiryBucketsResponse, 'stock_expiry_buckets');
+      const countPromises = BATCH_TABS.map(({ value }) => {
+        const query = {
           tab: value,
           search: appliedSearch,
           sort,
@@ -366,34 +323,39 @@ export function StockInventory({
           pageSize: 1,
           medicineId: initialMedicineId,
           expiryBucket: null,
-        })),
-        isStockListResponse,
-        'stock_batches_list',
-      ));
+        };
+        return apiMode
+          ? listStockBatches(query)
+          : readRpc(client!.rpc('stock_batches_list', stockListArgs(query)), isStockListResponse, 'stock_batches_list');
+      });
       const activeMovementsPromise = tab === 'adjustment-log'
-        ? readRpc(
-          client.rpc('stock_adjustments_log', {
-            p_page: page,
-            p_page_size: PAGE_SIZE,
-            p_reason: appliedSearch || null,
-            p_batch_id: null,
-          }),
-          isStockMovementsResponse,
-          'stock_adjustments_log',
-        )
+        ? apiMode
+          ? listStockAdjustments({ page, pageSize: PAGE_SIZE, reason: appliedSearch || null })
+          : readRpc(
+            client!.rpc('stock_adjustments_log', {
+              p_page: page,
+              p_page_size: PAGE_SIZE,
+              p_reason: appliedSearch || null,
+              p_batch_id: null,
+            }),
+            isStockMovementsResponse,
+            'stock_adjustments_log',
+          )
         : null;
       const movementCountPromise = tab === 'adjustment-log'
         ? null
-        : readRpc(
-          client.rpc('stock_adjustments_log', {
-            p_page: 1,
-            p_page_size: 1,
-            p_reason: appliedSearch || null,
-            p_batch_id: null,
-          }),
-          isStockMovementsResponse,
-          'stock_adjustments_log',
-        );
+        : apiMode
+          ? listStockAdjustments({ page: 1, pageSize: 1, reason: appliedSearch || null })
+          : readRpc(
+            client!.rpc('stock_adjustments_log', {
+              p_page: 1,
+              p_page_size: 1,
+              p_reason: appliedSearch || null,
+              p_batch_id: null,
+            }),
+            isStockMovementsResponse,
+            'stock_adjustments_log',
+          );
       const [batchResult, nextStats, nextBuckets, ...countResults] = await Promise.all([
         batchResultPromise,
         statsPromise,
@@ -445,9 +407,10 @@ export function StockInventory({
 
   const loadPicker = useCallback(async () => {
     const client = supabase;
+    const apiMode = getBackend() === 'api';
     const sequence = ++pickerSequence.current;
     if (!pickerOpen) return;
-    if (!client) {
+    if (!apiMode && !client) {
       setPickerError('Supabase is not configured.');
       setPickerLoading(false);
       return;
@@ -455,8 +418,7 @@ export function StockInventory({
     setPickerLoading(true);
     setPickerError('');
     try {
-      const response = await readRpc(
-        client.rpc('stock_batches_list', stockListArgs({
+      const query = {
           tab: 'all',
           search: appliedPickerSearch,
           sort: 'expiry_asc',
@@ -464,10 +426,14 @@ export function StockInventory({
           pageSize: PICKER_PAGE_SIZE,
           medicineId: initialMedicineId,
           expiryBucket: null,
-        })),
-        isStockListResponse,
-        'stock_batches_list',
-      );
+        } as const;
+      const response = apiMode
+        ? await listStockBatches(query)
+        : await readRpc(
+          client!.rpc('stock_batches_list', stockListArgs(query)),
+          isStockListResponse,
+          'stock_batches_list',
+        );
       if (sequence !== pickerSequence.current) return;
       setPickerRows(response.rows);
       setPickerCount(response.total_count);
@@ -488,24 +454,28 @@ export function StockInventory({
   useEffect(() => {
     if (!movementBatch) return;
     const client = supabase;
+    const apiMode = getBackend() === 'api';
     const sequence = ++movementSequence.current;
-    if (!client) {
+    if (!apiMode && !client) {
       setMovementError('Supabase is not configured.');
       setMovementLoading(false);
       return;
     }
     setMovementLoading(true);
     setMovementError('');
-    void readRpc(
-      client.rpc('stock_adjustments_log', {
-        p_page: movementPage,
-        p_page_size: PAGE_SIZE,
-        p_reason: null,
-        p_batch_id: movementBatch.id,
-      }),
-      isStockMovementsResponse,
-      'stock_adjustments_log',
-    ).then((response) => {
+    const movementsPromise = apiMode
+      ? listStockAdjustments({ page: movementPage, pageSize: PAGE_SIZE, batchId: movementBatch.id })
+      : readRpc(
+        client!.rpc('stock_adjustments_log', {
+          p_page: movementPage,
+          p_page_size: PAGE_SIZE,
+          p_reason: null,
+          p_batch_id: movementBatch.id,
+        }),
+        isStockMovementsResponse,
+        'stock_adjustments_log',
+      );
+    void movementsPromise.then((response) => {
       if (sequence !== movementSequence.current) return;
       setMovements(response.rows);
       setMovementCount(response.total_count);
@@ -548,19 +518,26 @@ export function StockInventory({
 
   const commitAdjustment = async () => {
     const client = supabase;
-    if (!client || !adjusting || !adjustmentPreview || !reason || saving) return;
+    const apiMode = getBackend() === 'api';
+    if ((!apiMode && !client) || !adjusting || !adjustmentPreview || !reason || saving) return;
     setSaving(true);
     setError('');
     setNotice('');
     try {
-      const { data, error: rpcError } = await client.rpc('adjust_stock', {
-        p_batch_id: adjusting.id,
-        p_quantity_delta: adjustmentPreview.delta,
-        p_reason: reason,
-      });
-      if (rpcError) throw rpcError;
+      const resultingQuantity = apiMode
+        ? await adjustStockBatch(adjusting.id, adjustmentPreview.delta, reason)
+        : await (async () => {
+          const { data, error: rpcError } = await client!.rpc('adjust_stock', {
+            p_batch_id: adjusting.id,
+            p_quantity_delta: adjustmentPreview.delta,
+            p_reason: reason,
+          });
+          if (rpcError) throw rpcError;
+          if (typeof data !== 'number') throw new Error('The stock adjustment response was invalid.');
+          return data;
+        })();
       dispatchStockChanged();
-      if (typeof data !== 'number' || data !== adjustmentPreview.resultingQuantity) {
+      if (resultingQuantity !== adjustmentPreview.resultingQuantity) {
         throw new Error('The stock adjustment response did not match the reviewed quantity.');
       }
       setAdjusting(null);
@@ -577,16 +554,21 @@ export function StockInventory({
 
   const commitWriteOff = async () => {
     const client = supabase;
-    if (!client || !writeOffBatch || saving) return;
+    const apiMode = getBackend() === 'api';
+    if ((!apiMode && !client) || !writeOffBatch || saving) return;
     setSaving(true);
     setError('');
     setNotice('');
     try {
-      const { error: rpcError } = await client.rpc('write_off_expired_batch', {
-        p_batch_id: writeOffBatch.id,
-        p_reason: 'expired',
-      });
-      if (rpcError) throw rpcError;
+      if (apiMode) {
+        await writeOffExpiredBatch(writeOffBatch.id);
+      } else {
+        const { error: rpcError } = await client!.rpc('write_off_expired_batch', {
+          p_batch_id: writeOffBatch.id,
+          p_reason: 'expired',
+        });
+        if (rpcError) throw rpcError;
+      }
       dispatchStockChanged();
       setNotice(`Batch ${writeOffBatch.batch_number} written off. The batch remains in inventory history.`);
       setWriteOffBatch(null);
@@ -673,7 +655,7 @@ export function StockInventory({
     {
       label: 'Write off',
       onSelect: setWriteOffBatch,
-      disabled: (batch) => batch.quantity_remaining <= 0 || batch.expiry_date >= new Date().toISOString().slice(0, 10),
+      disabled: (batch) => batch.quantity_remaining <= 0 || batch.status !== 'EXPIRED',
     },
   ], []);
 
@@ -701,7 +683,8 @@ export function StockInventory({
 
   const exportRows = async (format: 'csv' | 'xlsx') => {
     const client = supabase;
-    if (!client || exporting) return;
+    const apiMode = getBackend() === 'api';
+    if ((!apiMode && !client) || exporting) return;
     setExporting(true);
     setError('');
     try {
@@ -710,16 +693,22 @@ export function StockInventory({
         let total = 0;
         let exportPage = 1;
         do {
-          const response = await readRpc(
-            client.rpc('stock_adjustments_log', {
-              p_page: exportPage,
-              p_page_size: EXPORT_PAGE_SIZE,
-              p_reason: appliedSearch || null,
-              p_batch_id: null,
-            }),
-            isStockMovementsResponse,
-            'stock_adjustments_log',
-          );
+          const response = apiMode
+            ? await listStockAdjustments({
+              page: exportPage,
+              pageSize: EXPORT_PAGE_SIZE,
+              reason: appliedSearch || null,
+            })
+            : await readRpc(
+              client!.rpc('stock_adjustments_log', {
+                p_page: exportPage,
+                p_page_size: EXPORT_PAGE_SIZE,
+                p_reason: appliedSearch || null,
+                p_batch_id: null,
+              }),
+              isStockMovementsResponse,
+              'stock_adjustments_log',
+            );
           allMovements.push(...response.rows);
           total = response.total_count;
           if (response.rows.length === 0) break;
@@ -741,8 +730,7 @@ export function StockInventory({
         let total = 0;
         let exportPage = 1;
         do {
-          const response = await readRpc(
-            client.rpc('stock_batches_list', stockListArgs({
+          const query = {
               tab,
               search: appliedSearch,
               sort,
@@ -750,10 +738,14 @@ export function StockInventory({
               pageSize: EXPORT_PAGE_SIZE,
               medicineId: initialMedicineId,
               expiryBucket,
-            })),
-            isStockListResponse,
-            'stock_batches_list',
-          );
+            };
+          const response = apiMode
+            ? await listStockBatches(query)
+            : await readRpc(
+              client!.rpc('stock_batches_list', stockListArgs(query)),
+              isStockListResponse,
+              'stock_batches_list',
+            );
           allBatches.push(...response.rows);
           total = response.total_count;
           if (response.rows.length === 0) break;
