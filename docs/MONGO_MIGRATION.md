@@ -35,6 +35,10 @@ This file tracks migration phase deliverables and verification. It does not auth
 
 **Status: VERIFIED (local development stack only).** Root cause: Mongo users are created in the application database, but the application client's connection URI incorrectly specified `authSource=admin`. The initializer now authenticates that client against its application database; root initialization continues to authenticate against `admin`.
 
+- Current-session rerun: `docker compose build mongo-init` succeeded. `docker compose up --no-deps --force-recreate mongo-init` logged `replica_set_and_app_user_ready` and `application_indexes_ready`, then exited 0.
+- `docker compose up --detach --build api web` completed; `docker compose ps --all` showed Mongo healthy, mongo-init Exited (0), API healthy, and web healthy.
+- `curl.exe --silent --show-error --include http://localhost:8080/api/health` returned HTTP 200 with `{"status":"ok","database":"ok"}`.
+- No volumes were removed or reset. No environment values were printed.
 - `docker compose build mongo-init` completed successfully.
 - `npm --prefix server run lint` and `npm --prefix server run build` passed. `npm --prefix server test` reported 65 tests: 58 passed, 0 failed, 7 skipped (the real-Mongo integration tests are exercised in step 2).
 - `docker compose up --no-deps --force-recreate mongo-init` logged `replica_set_and_app_user_ready` and `application_indexes_ready`, then exited with code 0.
