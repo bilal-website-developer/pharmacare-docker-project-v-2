@@ -377,6 +377,56 @@ test('medicine CRUD and units enforce valid references/defaults and scope data t
       role: 'admin',
       permissions: [],
     });
+    const otherReferences = await createCategoryAndBrand(app, outsider);
+    const foreignProduct = await createMedicine(
+      app,
+      outsider,
+      otherReferences.categoryId,
+      otherReferences.brandId,
+      'OTHER-001',
+    );
+    const localUserReadingForeign = await app.inject({
+      method: 'GET',
+      url: `/api/medicines/${foreignProduct.id}`,
+      headers: headers(admin),
+    });
+    assert.equal(localUserReadingForeign.statusCode, 404);
+    const localUserDeletingForeign = await app.inject({
+      method: 'DELETE',
+      url: `/api/medicines/${foreignProduct.id}`,
+      headers: headers(admin),
+    });
+    assert.equal(localUserDeletingForeign.statusCode, 404);
+    const foreignOwnerStillReads = await app.inject({
+      method: 'GET',
+      url: `/api/medicines/${foreignProduct.id}`,
+      headers: headers(outsider),
+    });
+    assert.equal(foreignOwnerStillReads.statusCode, 200);
+
+    const massAssignedProduct = await app.inject({
+      method: 'POST',
+      url: '/api/medicines',
+      headers: headers(admin),
+      payload: {
+        code: 'MED-CROSS-SHOP',
+        name: 'Rejected cross-shop assignment',
+        genericName: 'Generic ingredient',
+        categoryId,
+        brandId,
+        drugClass: 'OTC',
+        storageCondition: 'ROOM_TEMPERATURE',
+        shopId: otherShop._id.toHexString(),
+        units: [{
+          name: 'Tablet',
+          conversionFactorBaseUnits: 1,
+          pricePaisa: '100',
+          isDefaultSaleUnit: true,
+        }],
+      },
+    });
+    assert.equal(massAssignedProduct.statusCode, 400);
+
     const foreign = await app.inject({
       method: 'GET',
       url: `/api/medicines/${created.id}`,

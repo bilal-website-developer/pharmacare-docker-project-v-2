@@ -6,6 +6,7 @@ export const testConfig: AppConfig = {
   port: 3000,
   mongoUri: 'mongodb://127.0.0.1:27017/test',
   mongoDbName: 'test',
+  webOrigin: 'http://localhost:8080',
   accessTokenSecret: 'a'.repeat(64),
   refreshTokenPepper: 'b'.repeat(64),
   accessTokenTtlSeconds: 15 * 60,

@@ -5,6 +5,7 @@ const configSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().min(1).default('0.0.0.0'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+  WEB_ORIGIN: z.string().url().optional(),
   MONGO_HOST: z.string().min(1),
   MONGO_PORT: z.coerce.number().int().min(1).max(65535).default(27017),
   MONGO_APP_DB: z.string().regex(/^[A-Za-z0-9_-]{1,63}$/),
@@ -21,6 +22,7 @@ export type AppConfig = {
   port: number;
   mongoUri: string;
   mongoDbName: string;
+  webOrigin: string;
   accessTokenSecret: string;
   refreshTokenPepper: string;
   accessTokenTtlSeconds: number;
@@ -55,6 +57,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   const values = parsed.data;
+  const configuredOrigin = values.WEB_ORIGIN ?? 'http://localhost:8080';
+  let webOrigin: string;
+  try {
+    const url = new URL(configuredOrigin);
+    if (!['http:', 'https:'].includes(url.protocol)
+      || url.pathname !== '/'
+      || url.search
+      || url.hash
+      || url.username
+      || url.password) {
+      throw new Error('invalid origin');
+    }
+    webOrigin = url.origin;
+  } catch {
+    throw new Error('Invalid server configuration: WEB_ORIGIN');
+  }
   const username = encodeCredential(values.MONGO_APP_USERNAME);
   const password = encodeCredential(values.MONGO_APP_PASSWORD);
 
@@ -64,6 +82,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port: values.PORT,
     mongoUri: `mongodb://${username}:${password}@${values.MONGO_HOST}:${values.MONGO_PORT}/${values.MONGO_APP_DB}?authSource=${values.MONGO_APP_DB}&replicaSet=rs0`,
     mongoDbName: values.MONGO_APP_DB,
+    webOrigin,
     accessTokenSecret: values.JWT_ACCESS_SECRET,
     refreshTokenPepper: values.REFRESH_TOKEN_PEPPER,
     accessTokenTtlSeconds: 15 * 60,

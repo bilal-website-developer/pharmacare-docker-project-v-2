@@ -52,3 +52,18 @@ test('rejects an invalid database name and invalid port', () => {
     /PORT/,
   );
 });
+
+test('normalizes a valid web origin and rejects origins with paths or credentials', () => {
+  assert.equal(
+    loadConfig({ ...validEnv, WEB_ORIGIN: 'https://pharma.example.test/' }).webOrigin,
+    'https://pharma.example.test',
+  );
+  assert.throws(
+    () => loadConfig({ ...validEnv, WEB_ORIGIN: 'https://pharma.example.test/app' }),
+    /WEB_ORIGIN/,
+  );
+  assert.throws(
+    () => loadConfig({ ...validEnv, WEB_ORIGIN: 'https://pharma.example.test/app?mode=one' }),
+    /WEB_ORIGIN/,
+  );
+});

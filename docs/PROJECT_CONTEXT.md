@@ -95,17 +95,17 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Current status
 
-- **Current checkout:** `feature/mongo-migration`. Phase 8 coverage and current test evidence are tracked in `docs/MONGO_MIGRATION.md`; all manual UI and production acceptance remain outstanding.
+- **Current checkout:** `feature/mongo-migration`. Phase 8 API coverage and Phase 9 local verification evidence are tracked in `docs/MONGO_MIGRATION.md`; manual UI and production security acceptance remain outstanding.
 - The Supabase implementation remains intact as the alternate backend. Owner-reported migration/ACL state and source-only barcode/Trash Bin changes are historical context, not live verification; do not run Supabase operations as part of the Mongo migration.
-- Existing UI behavior includes POS split tender, customer credit, cashier print requests, audited receipt-only print edits, role-based cost visibility, barcode/label workflows, stock alerts, and Trash Bin; API-mode replacements are still incomplete for several screens.
-- Security and runtime gates still open: verify the production Supabase ACL only if separately authorized, complete Mongo route-wide security checks, and obtain manual API-mode acceptance before cut-over. Keep Supabase code and migrations untouched.
+- Existing UI behavior includes POS split tender, customer credit, cashier print requests, audited receipt-only print edits, role-based cost visibility, barcode/label workflows, stock alerts, and Trash Bin; API-mode adapters are implemented while manual acceptance remains pending.
+- Security and runtime gates still open: production CORS/TLS and Mongo rate-limit load behavior, backup/restore proof, production deployment, demo data, and manual API-mode acceptance. Local security checks are recorded in `docs/MONGO_SECURITY_REPORT.md`; no penetration test was performed. Keep Supabase code and migrations untouched.
 
 ## Known issues and Later
 
 - Multi-shop decisions are captured in `docs/MULTI_SHOP_FULL_PLAN.md` and `docs/MASTER_PLAN.md`; they are design references, not authority for unimplemented access paths or database changes.
 - Legacy Supabase schema, migrations, RPCs, and ACLs may differ from checked-in source. No live verification was performed in this work; leave `supabase/` and its migrations untouched until approved cut-over.
 - The Supabase baseline SQL is reconstructed, not a complete dump; timestamped rollback scripts are not forward migrations. Legacy barcode uniqueness, Supabase print/Trash Bin deployments, and physical scanner/printer behavior remain unverified; QR labels and direct ESC/POS support are not implemented.
-- Existing Supabase mode and demo features may still use legacy or in-memory data. In API mode, listed modules use the Mongo API; route-wide security hardening, backup/restore proof, production deployment, and manual UI acceptance remain open.
+- Existing Supabase mode and demo features may still use legacy or in-memory data. In API mode, listed modules use the Mongo API; backup/restore proof, production deployment, and manual UI acceptance remain open.
 
 ## Assumptions
 
@@ -115,6 +115,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
+- 2026-10-17 — Phase 9 local hardening checks: strict-origin CORS, rate limits, generic errors, redaction, security headers, route/cashier sweeps, and audits; root tests 264 total (253 passed, 0 failed, 11 skipped), Compose Mongo 11/11, audits 0 vulnerabilities. Production acceptance and penetration testing remain open.
 - 2026-10-17 — Products/Stock Products API wiring, CSV unit barcodes, and server-computed margin DTOs added. Root tests: 250 total, 239 passed, 0 failed, 11 skipped; lint/build passed. Manual UI acceptance remains open.
 - 2026-10-17 — Trash Bin API wiring and transactional deactivation/purchase-void events added. Root tests: 254 total, 243 passed, 0 failed, 11 skipped; Compose tests: 11 passed, 0 failed, 0 skipped; lint/build passed. Manual UI acceptance remains open.
 - 2026-10-17 — Reviewed API-mode barcode label and receipt/memo paths: display DTOs are allowlisted and dynamic HTML text is escaped; manual printer/browser acceptance remains open.
@@ -135,15 +136,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-17T09:46:42.872Z
+Generated at (UTC): 2026-10-17T10:15:03.390Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- docs: record Phase 8 print parity
 - feat: wire Trash Bin to Mongo API
 - feat: wire Products module to Mongo API
 - feat: wire dashboard and business analytics
 - test: verify phase seven dashboard and cash controls
-- fix: align product expiry dates with shop timezone
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 

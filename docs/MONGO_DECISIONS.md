@@ -45,3 +45,17 @@ Decisions recorded while finishing the migration. Revisit a decision only when n
 - **Decision:** Keep the Vite dev proxy pointed at `http://127.0.0.1:3000` by default and allow `VITE_API_PROXY_TARGET` to override it for direct host-mode Fastify development on `http://127.0.0.1:3001`.
 - **Alternatives:** Hardcode the proxy to `:3001` everywhere; hardcode it to `:3000` everywhere; publish the API port in Compose.
 - **Reason:** Docker Compose runs the API on port 3000 inside the private network, while direct host development often runs Fastify on 3001. The default proxy should match the Compose runtime without preventing local host-mode debugging.
+
+## 2026-10-17
+
+### API security defaults
+
+- **Decision:** Allow one normalized `WEB_ORIGIN`; rate-limit by HMAC(IP, method, route, minute) with 120 reads, 60 writes, and 30 auth requests per window; retain the stricter login cap of 10 and five-failure account lockout. Persist general request counters in Mongo with TTL expiry. Test-mode apps use an injected rate-limit store so unit tests cannot unexpectedly access Mongo.
+- **Alternatives:** Wildcard/multi-origin CORS; in-memory-only limits; shared unkeyed IP/route identifiers; applying the production Mongo store implicitly to tests.
+- **Reason:** Restrict browser access, keep rate-limit keys non-reversible, bound abuse across API instances, and keep ordinary test setup isolated. The persisted store's distributed load/race behavior is not covered by the current test suite.
+
+### API and Nginx security headers
+
+- **Decision:** Apply `nosniff`, frame denial, strict referrer/permissions policy, same-origin resource policy, and a JSON-only API CSP. Nginx hides overlapping API headers before applying its own copy, avoiding duplicate response fields. Do not add a global frontend CSP until legacy external origins have been inventoried.
+- **Alternatives:** Duplicate upstream/proxy headers; apply the API's restrictive CSP to the React frontend; omit headers on static responses.
+- **Reason:** Keep a consistent single header value through the local proxy while avoiding a CSP that would break the retained Supabase path.

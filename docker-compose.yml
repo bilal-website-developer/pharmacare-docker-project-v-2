@@ -61,6 +61,7 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 3000
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
       MONGO_HOST: mongo
       MONGO_PORT: 27017
       MONGO_APP_DB: ${MONGO_APP_DB:?MONGO_APP_DB is required}

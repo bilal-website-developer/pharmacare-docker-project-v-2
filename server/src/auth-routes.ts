@@ -20,6 +20,7 @@ import {
   validateIdempotencyHeader,
   type IdempotencyStore,
 } from './idempotency.js';
+import { LOGIN_RATE_LIMIT } from './security.js';
 
 const loginSchema = z.object({
   shopSlug: z.string().trim().min(1).max(63).regex(/^[a-zA-Z0-9-]+$/),
@@ -33,7 +34,6 @@ const changePasswordSchema = z.object({
 
 const REFRESH_COOKIE = 'pharma_refresh';
 const RATE_WINDOW_MS = 60_000;
-const RATE_LIMIT = 10;
 const FAILURE_LIMIT = 5;
 const LOCK_DURATION_MS = 15 * 60_000;
 let dummyHashPromise: Promise<string> | undefined;
@@ -211,7 +211,7 @@ export function registerAuthRoutes(
     const now = new Date();
     const rate = clientRateKey(request, tokenConfig.refreshPepper, now);
     const attempts = await repository.consumeLoginRateLimit(rate.key, rate.expiresAt);
-    if (attempts > RATE_LIMIT) {
+    if (attempts > LOGIN_RATE_LIMIT) {
       await repository.writeAudit(auditEvent('auth.login.rate_limited', null, {}, now));
       return reply.code(429).send({ error: 'RATE_LIMITED' });
     }

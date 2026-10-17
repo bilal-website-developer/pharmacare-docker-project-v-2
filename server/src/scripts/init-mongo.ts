@@ -191,6 +191,9 @@ async function ensureIndexes(database: Db): Promise<void> {
     authRateLimits: [
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'auth_rate_limit_expiry_ttl' },
     ],
+    requestRateLimits: [
+      { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'request_rate_limit_expiry_ttl' },
+    ],
     refreshSessions: [
       { key: { tokenHash: 1 }, unique: true, name: 'refresh_token_hash_unique' },
       { key: { shopId: 1, userId: 1, revokedAt: 1, expiresAt: 1 }, name: 'refresh_user_state' },
