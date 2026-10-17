@@ -6,6 +6,7 @@ RUN npm ci
 
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
+COPY data ./data
 COPY integration ./integration
 RUN npm run build
 
@@ -22,6 +23,7 @@ WORKDIR /app
 COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --from=production-dependencies --chown=node:node /app/package.json ./package.json
 COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/data ./data
 
 USER node
 EXPOSE 3000

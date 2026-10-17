@@ -11,6 +11,7 @@ import { MongoCatalogRepository } from '../dist/catalog-repository.js';
 import { MongoStockRepository } from '../dist/stock-repository.js';
 import { MongoSalesRepository } from '../dist/sales-repository.js';
 import { registerSetupRoutes } from '../dist/setup-routes.js';
+import { importStarterCatalog, parseStarterCatalog } from '../dist/starter-catalog.js';
 
 let client;
 let database;
@@ -1167,4 +1168,98 @@ test('Mongo first-run setup is one-time, password-protected, and concurrent-safe
       database.collection(name).deleteMany({}),
     ));
   }
+});
+
+test('Mongo starter catalog import is Super Admin-only, transactional, inactive, and idempotent by code', { skip: !enabled }, async () => {
+  await withFixture(async ({ shopId, actor }) => {
+    const entries = parseStarterCatalog([
+      {
+        code: 'STARTER-DEMO-1',
+        name: 'Demo Compound Starter One',
+        genericName: 'Demo Ingredient Starter One',
+        category: 'Demo Starter',
+        manufacturer: 'Demo Lab',
+        drugClass: 'OTC',
+        unitName: 'tablet',
+        conversionFactorBaseUnits: 1,
+      },
+      {
+        code: 'STARTER-DEMO-2',
+        name: 'Demo Compound Starter Two',
+        genericName: 'Demo Ingredient Starter Two',
+        category: 'Demo Starter',
+        manufacturer: 'Demo Lab',
+        drugClass: 'OTC',
+        unitName: 'capsule',
+        conversionFactorBaseUnits: 1,
+      },
+    ]);
+    await assert.rejects(
+      importStarterCatalog(client, config.mongoDbName, shopId, actor._id, entries),
+      /STARTER_CATALOG_SUPER_ADMIN_REQUIRED/,
+    );
+    assert.equal(await database.collection('medicines').countDocuments({ shopId, normalizedCode: /^starter-demo-/ }), 0);
+
+    await database.collection('categories').insertOne({
+      _id: new ObjectId(),
+      shopId,
+      name: 'Demo Blocked',
+      normalizedName: 'demo blocked',
+      isActive: false,
+      deletedAt: null,
+    });
+    await database.collection('users').updateOne(
+      { _id: actor._id, shopId },
+      { $set: { role: 'super_admin' } },
+    );
+    await assert.rejects(
+      importStarterCatalog(client, config.mongoDbName, shopId, actor._id, [
+        entries[0],
+        { ...entries[1], category: 'Demo Blocked' },
+      ]),
+      /STARTER_CATALOG_CATEGORY_UNAVAILABLE/,
+    );
+    assert.equal(await database.collection('medicines').countDocuments({ shopId, normalizedCode: /^starter-demo-/ }), 0);
+    assert.equal(await database.collection('categories').countDocuments({
+      shopId, normalizedName: 'demo starter',
+    }), 0);
+    assert.equal(await database.collection('brands').countDocuments({ shopId, normalizedName: 'demo lab' }), 0);
+    assert.equal(await database.collection('auditLogs').countDocuments({ shopId }), 0);
+
+    const imported = await importStarterCatalog(client, config.mongoDbName, shopId, actor._id, entries);
+    assert.deepEqual(imported, {
+      importedCount: 2,
+      skippedCount: 0,
+      createdCategoryCount: 1,
+      createdManufacturerCount: 1,
+    });
+    const repeated = await importStarterCatalog(client, config.mongoDbName, shopId, actor._id, entries);
+    assert.deepEqual(repeated, {
+      importedCount: 0,
+      skippedCount: 2,
+      createdCategoryCount: 0,
+      createdManufacturerCount: 0,
+    });
+
+    const medicines = await database.collection('medicines').find({
+      shopId,
+      normalizedCode: /^starter-demo-/,
+    }).toArray();
+    assert.equal(medicines.length, 2);
+    assert.ok(medicines.every((medicine) =>
+      medicine.isActive === false && medicine.defaultUnitPricePaisa.toString() === '0'
+      && !('cost' in medicine) && !('quantityRemainingBaseUnits' in medicine),
+    ));
+    const medicineIds = medicines.map((medicine) => medicine._id);
+    const units = await database.collection('medicineUnits').find({ shopId, medicineId: { $in: medicineIds } }).toArray();
+    assert.equal(units.length, 2);
+    assert.ok(units.every((unit) =>
+      unit.pricePaisa.toString() === '0' && !('quantity' in unit) && !('costPaisa' in unit),
+    ));
+    assert.equal(await database.collection('stockBatches').countDocuments({ shopId, medicineId: { $in: medicineIds } }), 0);
+    assert.equal(await database.collection('auditLogs').countDocuments({
+      shopId,
+      event: 'medicine.starter_catalog_imported',
+    }), 2);
+  });
 });

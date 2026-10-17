@@ -54,6 +54,12 @@ Decisions recorded while finishing the migration. Revisit a decision only when n
 - **Alternatives:** Leave bootstrap as CLI-only; store the plaintext code in Mongo; allow setup without a code on a private network.
 - **Reason:** Provide a guided shop-PC setup while retaining one-time use, bounded validity, and no stored plaintext bootstrap credential. The installer lifecycle and end-user experience remain to be implemented/tested.
 
+### Starter catalog safety defaults
+
+- **Decision:** Keep the 20-entry starter catalog fictional and free of price/cost/stock/batch/expiry values. Import only missing medicine codes in a Mongo transaction, create inactive products with zero-paisa default units, and skip existing codes without overwriting shop data.
+- **Alternatives:** Import as active products; invent default prices or stock; update existing matching codes during a repeat import.
+- **Reason:** Avoid accidental sales, fabricated financial/inventory data, and destructive overwrites while still giving a shop an optional structured starting catalog. Owners must validate identities, set actual prices, and explicitly activate items.
+
 ### API security defaults
 
 - **Decision:** Allow one normalized `WEB_ORIGIN`; rate-limit by HMAC(IP, method, route, minute) with 120 reads, 60 writes, and 30 auth requests per window; retain the stricter login cap of 10 and five-failure account lockout. Persist general request counters in Mongo with TTL expiry. Test-mode apps use an injected rate-limit store so unit tests cannot unexpectedly access Mongo.

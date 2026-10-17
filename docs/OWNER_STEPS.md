@@ -13,3 +13,12 @@ docker compose ps
 Open the local web app. If Mongo has no shop, the wizard asks for pharmacy identity, time zone, and the first Super Admin details. Enter the one-time code displayed by the installer in the wizard. The password is sent only to the API over the local service path and stored as an Argon2id hash. The code expires and the API rejects subsequent setup attempts. Do not save credentials in command history.
 
 The interactive `npm run seed:superadmin` CLI remains available for controlled owner-operated bootstrap when needed. It creates the initial shop and Super Admin; enter the password only at its hidden prompt. Do not run the CLI after the setup wizard has already created the shop, and do not delete a Mongo volume or reset credentials to bypass a setup guard.
+
+After verifying the configured shop and deciding that the synthetic inactive examples are wanted, the Super Admin may run the optional starter catalog import:
+
+```powershell
+Set-Location E:\PHARMCYYYY
+npm.cmd run seed:starter-catalog
+```
+
+It is safe to repeat by medicine code and will not update an existing record, set prices, activate products, or create stock. Set real prices and review/activate each product only through the normal authorized application workflow.
