@@ -141,15 +141,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-17T19:54:47.582Z
+Generated at (UTC): 2026-10-17T19:55:54.268Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: add safe starter catalog import
 - feat: add first-run pharmacy setup
 - feat: add API unavailable retry screen
 - feat: expose scoped admin audit log
 - chore: record autopilot baseline
-- huge update
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 

@@ -2,18 +2,17 @@
 
 ## Current position
 
-> Current position: first-run setup is committed as `029ee9e`; starter catalog code/data and tests pass current local checks and await commit. Phase 7 and Phase 8 implementation changes are committed; browser/manual acceptance remains outstanding. Continue with shop installer/release workflow, backup/restore, production packaging, demo/manual tests, and cutover preparation.
+> Current position: first-run setup is committed as `029ee9e`; starter catalog is committed as `67c68d9`. Phase 7 and Phase 8 implementation changes are committed; browser/manual acceptance remains outstanding. Continue with shop installer/release workflow, backup/restore, production packaging, demo/manual tests, and cutover preparation.
 
 - Branch: `feature/mongo-migration`.
-- Recent commits: `e7dce1e` housekeeping, `9d3f0bb` admin audit-log endpoint, `d661142` API-unavailable retry screen.
-- Current worktree contains starter catalog import/data/docs and a real-Mongo rollback/idempotency test.
+- Recent commits: `e7dce1e` housekeeping, `9d3f0bb` admin audit-log endpoint, `d661142` API-unavailable retry screen, `029ee9e` first-run setup, `67c68d9` starter catalog.
+- Worktree is clean following the catalog commit.
 - No `.env` values were read or printed. No Supabase files, volumes, remote branches, or live services were changed.
 
 ## Current verification evidence
 
 | Command | Result |
 |---|---|
-| `docker compose run --build --rm --no-deps api-test` | 12 passed, 0 failed, 0 skipped |
 | `npm.cmd test` | 272 total, 259 passed, 0 failed, 13 skipped |
 | `npm.cmd run lint` | Exit 0 |
 | `npm.cmd run build` | Exit 0; existing Vite `__dirname` and chunk-size warnings |
@@ -26,7 +25,6 @@ The root test runner intentionally skips real-Mongo cases, which are exercised b
 
 ## Open risks and next work
 
-- Commit the current starter catalog batch after final diff-scope checks and current docs are updated.
 - The setup wizard currently requires `SETUP_CODE_HASH` and `SETUP_CODE_EXPIRES_AT`; an installer that generates and displays a one-time code is still required.
 - A local shop-PC install path still needs to create the per-shop Docker data environment and provision a one-time setup code without exposing secrets in logs or command history.
 - Offline shop installer/release and uninstaller/update/restore scripts, scheduled backup/restore rehearsal, production Compose/TLS deployment docs, demo seed/manual role plan, and Phase 12 cutover checklist remain open.
