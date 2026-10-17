@@ -20,6 +20,7 @@ import { Sidebar, NavItemKey } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
 import { DashboardView } from './components/DashboardView';
 import { LoginView } from './components/LoginView';
+import { BackendUnavailableView } from './components/BackendUnavailableView';
 import type { ProductFilter } from './components/InventoryScreen';
 import { AuthSession, refreshAuthSession, restoreAuthSession, signOut } from './utils/auth';
 import { getBackend, isUnauthenticatedApiError } from './api';
@@ -105,6 +106,8 @@ export default function App() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [authMessage, setAuthMessage] = useState('');
+  const [apiUnavailable, setApiUnavailable] = useState(false);
+  const [retryingApi, setRetryingApi] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -113,7 +116,9 @@ export default function App() {
       setSessionChecked(true);
       setAuthMessage('Your session has expired. Sign in again.');
     };
+    const handleApiUnavailable = () => setApiUnavailable(true);
     window.addEventListener('pharma-care:api-session-expired', handleApiSessionExpired);
+    window.addEventListener('pharma-care:api-unavailable', handleApiUnavailable);
     const client = getBackend() === 'supabase' ? supabase : null;
     const authListener = client?.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT' && !disposed) {
@@ -139,9 +144,25 @@ export default function App() {
     return () => {
       disposed = true;
       window.removeEventListener('pharma-care:api-session-expired', handleApiSessionExpired);
+      window.removeEventListener('pharma-care:api-unavailable', handleApiUnavailable);
       authListener?.data.subscription.unsubscribe();
     };
   }, []);
+
+  const retryApiConnection = async () => {
+    setRetryingApi(true);
+    try {
+      const profile = await restoreAuthSession();
+      setSession(profile);
+      setAuthMessage('');
+      setApiUnavailable(false);
+      if (!profile) window.history.replaceState({}, '', '/login');
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : 'Could not reconnect to the application server.');
+    } finally {
+      setRetryingApi(false);
+    }
+  };
 
   useEffect(() => {
     if (!session) return;
@@ -216,6 +237,10 @@ export default function App() {
     setSession(null);
     window.history.replaceState({}, '', '/login');
   };
+
+  if (getBackend() === 'api' && apiUnavailable) {
+    return <BackendUnavailableView onRetry={() => void retryApiConnection()} retrying={retryingApi} />;
+  }
 
   if (!sessionChecked) {
     return <div className="app-loading flex min-h-screen items-center justify-center bg-surface"><PharmaLogo size={12} /></div>;

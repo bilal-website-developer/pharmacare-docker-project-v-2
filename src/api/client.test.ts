@@ -4,10 +4,16 @@ import { apiRequest, ApiError, clearApiAccessToken, setApiAccessToken } from './
 import { getBackend } from './config';
 
 const originalFetch = globalThis.fetch;
+const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
   clearApiAccessToken();
+  if (originalWindowDescriptor) {
+    Object.defineProperty(globalThis, 'window', originalWindowDescriptor);
+  } else {
+    Reflect.deleteProperty(globalThis, 'window');
+  }
 });
 
 test('API backend is the default when VITE_BACKEND is unset', () => {
@@ -126,4 +132,23 @@ test('normalizes API errors and does not expose server details', async () => {
       return true;
     },
   );
+});
+
+test('notifies the application shell when the API transport is unavailable', async () => {
+  const events: string[] = [];
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dispatchEvent: (event: Event) => { events.push(event.type); return true; } },
+  });
+  globalThis.fetch = async () => {
+    throw new TypeError('network details must not be exposed');
+  };
+
+  await assert.rejects(
+    apiRequest('/api/health'),
+    (error: unknown) => error instanceof ApiError
+      && error.code === 'API_UNAVAILABLE'
+      && error.status === 0,
+  );
+  assert.deepEqual(events, ['pharma-care:api-unavailable']);
 });

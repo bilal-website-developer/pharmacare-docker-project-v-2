@@ -59,3 +59,10 @@
 - Current verification: root tests 264 total (253 passed, 0 failed, 11 skipped), lint and build exit 0, security suite 9/9, Compose Mongo suite 11/11.
 - The Compose integration suite additionally proves manager-role denial, missing-permission denial, foreign-shop exclusion, and audit DTO omission of raw before/after content.
 - Phase 7 change is awaiting its dedicated commit. Next: continue Phase 8 source checklist, then setup, installer/backup, demo/manual and cutover-preparation work.
+
+## Session update — Phase 8 backend-unavailable retry
+
+- The API client dispatches an unavailable event on transport failure and HTTP 502/503/504; API mode renders a themed retry screen that attempts session restoration. Supabase behavior is unchanged.
+- `npm.cmd run test:api-client`: 6 passed, 0 failed, 0 skipped. `npm.cmd run lint` and `npm.cmd run build` exited 0. Browser/shop-PC recovery remains unverified.
+- Phase 7 audit-log changes were committed as `9d3f0bb`.
+- Next: inspect the remaining Phase 8 checklist for concrete API-mode gaps, then implement the first-run setup and seed catalog workflow.

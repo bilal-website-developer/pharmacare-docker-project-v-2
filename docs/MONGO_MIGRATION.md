@@ -16,7 +16,7 @@ This file tracks migration phase deliverables and verification. It does not auth
 | 6 | POS sales and customer APIs | Implemented; selected Mongo transactions verified | Real replica-set tests cover sale rollback, unique customer ledger references, concurrent last-unit sale, and idempotency. Full route and operational acceptance remain open. |
 | 6b | Real Mongo verification and timezone consistency | Verified in local Compose integration suite | Shop-local “today” is used through stock, expiry, alert, purchase, adjustment, write-off, and sales logic. Karachi midnight boundary tests and real Mongo transactional cases pass; this is not production acceptance. |
 | 7 | Returns, voids, print requests, settings, expenses, cash book, reports, dashboard, audit-log read | Implemented; targeted Mongo tests passed | `server/src/phase7-routes.ts`; transactional business writes, role-safe aggregates, and admin/`manage_users`-gated `/api/audit-logs` with shop scope and an allowlisted projection. Phase 8 frontend migration remains manual-acceptance pending; Supabase paths remain intact. |
-| 8 | Frontend API client and module-by-module switch | Auth/session and listed feature modules wired to Mongo API; barcode/label/receipt paths reviewed; manual UI checks remain | API-mode labels use an allowlisted product display model; receipt/memo rendering uses safe print snapshots and the API print workflow. Supabase fallback remains. Browser acceptance and production runtime checks remain open. |
+| 8 | Frontend API client and module-by-module switch | API mode wired across tracked feature modules; transport-unavailable retry screen added; manual UI checks remain | Access tokens remain in memory and refresh cookies remain httpOnly; API errors are normalized; labels/receipts use allowlisted data and escaping. Supabase fallback remains. Browser acceptance and production runtime checks remain open. |
 | 9 | Security hardening | Local checks complete; production security acceptance open | [`MONGO_SECURITY_REPORT.md`](./MONGO_SECURITY_REPORT.md) records source/test, audit, Compose health, and CORS evidence. This is not a penetration test. |
 | 10 | Backups and production deployment | Not started | Backup/restore proof, production Compose, TLS proxy, and deployment documentation remain open. |
 | 11 | Demo data and manual test plan | Not started | Demo-only seed and per-role manual test plan remain open. |
@@ -288,6 +288,14 @@ Implemented route paths include `/api/returns/policy`, `/api/returns/sales/:invo
 
 - Source tests: `npm.cmd run test:receipt`, `npm.cmd run test:print-snapshot`, `npm.cmd run test:print-requests-api`, and `npm.cmd run test:labels` cover escaping, snapshot allowlisting, cost-field exclusion, barcode validation, and API DTO validation. The latest full root run for the Trash Bin batch reported 254 tests: 243 passed, 0 failed, 11 skipped; Compose real-Mongo tests reported 11 passed, 0 failed, 0 skipped. Lint and build passed; Vite's existing `__dirname` and chunk-size warnings remain.
 - Manual checklist (not yet run): in API mode, print labels for a product with medicine and unit barcodes and verify selected fields, MRP, expiry, copy counts, and page sizes; test hostile product/shop text and confirm it renders as text. Print sale, payment, and return memos; verify request/approval/edit/printed flow and ensure no cost/profit/margin appears. Repeat representative flows in Supabase mode. No browser/printer acceptance was performed.
+
+## Phase 8 progress — backend unavailable retry
+
+**Status: WRITTEN-UNVERIFIED for browser acceptance.** Fetch failures and gateway/service responses `502`, `503`, and `504` notify the app shell. In API mode the shell shows a themed, accessible backend-unavailable screen with a retry button; retry restores the existing cookie-backed auth session and returns to login or the workspace as appropriate. Supabase mode is unchanged.
+
+- `npm.cmd run test:api-client`: 6 passed, 0 failed, 0 skipped, including offline event notification and generic transport error handling.
+- `npm.cmd run lint`: exit 0. `npm.cmd run build`: exit 0 with existing Vite `__dirname` and large-chunk warnings.
+- Manual test still needed: stop/restart the API from a shop PC, check the retry screen appears without exposing server details, retry after health recovers, and confirm the user's session/login state is restored correctly.
 
 ## Autopilot step 5 — security hardening
 

@@ -59,6 +59,12 @@ export class ApiError extends Error {
 let accessToken: string | null = null;
 let refreshInFlight: Promise<string | null> | null = null;
 
+function notifyApiUnavailable(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('pharma-care:api-unavailable'));
+  }
+}
+
 export function setApiAccessToken(token: string): void {
   accessToken = token;
 }
@@ -100,12 +106,15 @@ async function send(
   }
 
   try {
-    return await fetch(path, {
+    const response = await fetch(path, {
       ...init,
       headers,
       credentials: 'include',
     });
+    if ([502, 503, 504].includes(response.status)) notifyApiUnavailable();
+    return response;
   } catch {
+    notifyApiUnavailable();
     throw new ApiError('API_UNAVAILABLE', 0);
   }
 }
