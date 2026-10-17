@@ -115,6 +115,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
+- 2026-10-17 — Phase 7 completion audit added admin-only, `manage_users`-gated `/api/audit-logs`; Mongo integration test confirms role/permission denials, shop isolation, and no raw before/after fields. Root tests 264 total (253 passed, 0 failed, 11 skipped); lint/build passed; Compose Mongo 11/11.
 - 2026-10-17 — Autopilot baseline re-run: lint/build passed, root tests 264 total (253 passed, 0 failed, 11 skipped), API security 9/9, Compose Mongo integration 11/11; added shell/PowerShell line-ending rules. Worktree was clean before this documentation batch; manual and production acceptance remain open.
 - 2026-10-17 — Phase 9 local hardening checks: strict-origin CORS, rate limits, generic errors, redaction, security headers, route/cashier sweeps, and audits; root tests 264 total (253 passed, 0 failed, 11 skipped), Compose Mongo 11/11, audits 0 vulnerabilities. Production acceptance and penetration testing remain open.
 - 2026-10-17 — Products/Stock Products API wiring, CSV unit barcodes, and server-computed margin DTOs added. Root tests: 250 total, 239 passed, 0 failed, 11 skipped; lint/build passed. Manual UI acceptance remains open.
@@ -137,15 +138,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-17T18:52:51.399Z
+Generated at (UTC): 2026-10-17T19:00:32.523Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- chore: record autopilot baseline
 - huge update
 - docs: record Phase 8 print parity
 - feat: wire Trash Bin to Mongo API
 - feat: wire Products module to Mongo API
-- feat: wire dashboard and business analytics
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 

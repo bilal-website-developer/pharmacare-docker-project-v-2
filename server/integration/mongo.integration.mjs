@@ -1020,6 +1020,52 @@ test('Mongo expense, settings, print approval and sale void workflows persist wi
         payload: { reason: 'Integration expense void' },
       });
       assert.equal(expenseVoid.statusCode, 200, expenseVoid.body);
+      const rolePermissions = [...actor.permissions, 'manage_users'];
+      actor.role = 'manager';
+      actor.permissions = rolePermissions;
+      await database.collection('users').updateOne(
+        { _id: actor._id, shopId },
+        { $set: { role: actor.role, permissions: actor.permissions } },
+      );
+      const managerAuditLogs = await app.inject({
+        method: 'GET', url: '/api/audit-logs', headers: headers(),
+      });
+      assert.equal(managerAuditLogs.statusCode, 403);
+      actor.role = 'admin';
+      actor.permissions = [...rolePermissions].filter((permission) => permission !== 'manage_users');
+      await database.collection('users').updateOne(
+        { _id: actor._id, shopId },
+        { $set: { role: actor.role, permissions: actor.permissions } },
+      );
+      const permissionDeniedAuditLogs = await app.inject({
+        method: 'GET', url: '/api/audit-logs', headers: headers(),
+      });
+      assert.equal(permissionDeniedAuditLogs.statusCode, 403);
+      actor.permissions = [...rolePermissions];
+      await database.collection('users').updateOne(
+        { _id: actor._id, shopId },
+        { $set: { permissions: actor.permissions } },
+      );
+      const foreignAuditId = new ObjectId();
+      const foreignShopId = new ObjectId();
+      await database.collection('auditLogs').insertOne({
+        _id: foreignAuditId,
+        shopId: foreignShopId,
+        actorId: actor._id,
+        event: 'foreign.shop.event',
+        entityType: 'sale',
+        occurredAt: new Date(),
+        before: { passwordHash: 'must-not-leak' },
+      });
+      const auditLogs = await app.inject({
+        method: 'GET', url: '/api/audit-logs?page=1&pageSize=200', headers: headers(),
+      });
+      assert.equal(auditLogs.statusCode, 200, auditLogs.body);
+      assert.ok(auditLogs.json().total > 0);
+      assert.equal(auditLogs.json().items.some((item) => item.event === 'foreign.shop.event'), false);
+      assert.equal('before' in auditLogs.json().items[0], false);
+      assert.equal('after' in auditLogs.json().items[0], false);
+      await database.collection('auditLogs').deleteOne({ _id: foreignAuditId });
       const cashBook = await app.inject({ method: 'GET', url: '/api/cash-book', headers: headers() });
       assert.equal(cashBook.statusCode, 200, cashBook.body);
       assert.equal(cashBook.json().totals.inflowPaisa, '1250');

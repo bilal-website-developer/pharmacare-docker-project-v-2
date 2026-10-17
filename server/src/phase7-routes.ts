@@ -28,6 +28,9 @@ const pageSchema = z.object({
   dateFrom: dateSchema.optional(),
   dateTo: dateSchema.optional(),
 }).strict();
+const auditLogQuerySchema = pageSchema.extend({
+  event: z.string().trim().min(1).max(120).optional(),
+}).strict();
 const returnRequestSchema = z.object({
   reason: z.string().trim().min(1).max(1000),
   items: z.array(z.object({
@@ -391,6 +394,51 @@ export function registerPhaseSevenRoutes(
   const salesHistory = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('sales_history')];
   const expense = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('expenses')];
   const admin = [requireAuth(authRepository, tokenConfig, idempotencyStore), requireRole('admin', 'super_admin')];
+
+  app.get('/api/audit-logs', {
+    preHandler: [...admin, requirePermission('manage_users')],
+  }, async (request, reply) => {
+    const user = caller(request, reply);
+    if (!user) return;
+    const parsed = auditLogQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
+    const timeZone = await shopTimeZone(authRepository, user.shopId);
+    const filter = {
+      shopId: user.shopId,
+      ...dateRangeFilter(parsed.data.dateFrom, parsed.data.dateTo, 'occurredAt', timeZone),
+      ...(parsed.data.event ? { event: parsed.data.event } : {}),
+    };
+    const collection = database.collection('auditLogs');
+    const [items, total] = await Promise.all([
+      collection.find(filter, {
+        projection: {
+          _id: 1,
+          event: 1,
+          entityType: 1,
+          entityId: 1,
+          actorId: 1,
+          occurredAt: 1,
+        },
+      }).sort({ occurredAt: -1, _id: -1 })
+        .skip((parsed.data.page - 1) * parsed.data.pageSize)
+        .limit(parsed.data.pageSize)
+        .toArray(),
+      collection.countDocuments(filter),
+    ]);
+    return reply.send({
+      items: items.map((item) => ({
+        id: id(item._id),
+        event: item.event,
+        entityType: item.entityType,
+        entityId: id(item.entityId),
+        actorId: id(item.actorId),
+        occurredAt: item.occurredAt,
+      })),
+      total,
+      page: parsed.data.page,
+      pageSize: parsed.data.pageSize,
+    });
+  });
 
   app.get('/api/returns/policy', { preHandler: pos }, async (request, reply) => {
     const user = caller(request, reply);
