@@ -682,6 +682,10 @@ test('Mongo returns enforce sold quantities, prevent double processing, and reco
         method: 'GET', url: '/api/expenses', headers: cashierHeaders,
       });
       assert.equal(cashierExpenses.statusCode, 403);
+      const cashierDashboard = await app.inject({
+        method: 'GET', url: '/api/dashboard/summary', headers: cashierHeaders,
+      });
+      assert.equal(cashierDashboard.statusCode, 403);
       const overReturn = await app.inject({
         method: 'POST',
         url: `/api/sales/${sale._id.toHexString()}/returns`,
@@ -784,6 +788,14 @@ test('Mongo returns enforce sold quantities, prevent double processing, and reco
       assert.equal(report.json().grossSalesPaisa, '150');
       assert.equal(report.json().returnsPaisa, '150');
       assert.equal(report.json().netSalesPaisa, '0');
+      const dashboard = await app.inject({
+        method: 'GET', url: '/api/dashboard/summary', headers: headers(),
+      });
+      assert.equal(dashboard.statusCode, 200, dashboard.body);
+      assert.equal(dashboard.json().grossSalesPaisa, '150');
+      assert.equal(dashboard.json().returnsPaisa, '150');
+      assert.equal(dashboard.json().todaySalesPaisa, '0');
+      assert.equal(dashboard.json().sellableStockBaseUnits, '9');
       const cashBook = await app.inject({ method: 'GET', url: '/api/cash-book', headers: headers() });
       assert.equal(cashBook.statusCode, 200, cashBook.body);
       assert.equal(cashBook.json().totals.inflowPaisa, '150');
