@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const contextPath = path.join(root, 'docs', 'PROJECT_CONTEXT.md');
-const packagePath = path.join(root, 'package.json');
 const startMarker = '<!-- AUTO:START -->';
 const endMarker = '<!-- AUTO:END -->';
 const skippedDirectories = new Set(['.git', 'node_modules', 'dist', 'coverage']);
@@ -43,41 +42,6 @@ async function walk(directory, visitor) {
   }
 }
 
-async function sourceTree() {
-  const lines = ['src/'];
-  async function addDirectory(directory, depth) {
-    let entries;
-    try {
-      entries = await readdir(directory, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    entries.sort((a, b) => a.name.localeCompare(b.name));
-    for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue;
-      if (entry.isDirectory()) {
-        const relative = displayPath(path.relative(root, path.join(directory, entry.name)));
-        lines.push(`${'  '.repeat(depth)}${relative}/`);
-        if (depth < 2) await addDirectory(path.join(directory, entry.name), depth + 1);
-      } else if (depth <= 2) {
-        lines.push(`${'  '.repeat(depth)}${displayPath(path.relative(root, path.join(directory, entry.name)))}`);
-      }
-    }
-  }
-  await addDirectory(path.join(root, 'src'), 1);
-  return lines;
-}
-
-async function testFiles() {
-  const files = [];
-  await walk(root, async (filePath) => {
-    if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(filePath)) {
-      files.push(displayPath(path.relative(root, filePath)));
-    }
-  });
-  return files.sort();
-}
-
 async function envNames() {
   const names = new Set();
   await walk(root, async (filePath) => {
@@ -95,14 +59,6 @@ function bulletList(values, emptyMessage) {
   return values.length ? values.map((value) => `- ${value}`).join('\n') : `- ${emptyMessage}`;
 }
 
-const project = JSON.parse(await readFile(packagePath, 'utf8'));
-const scripts = Object.entries(project.scripts ?? {}).map(([name, command]) => `- \`${name}\`: \`${command}\``);
-const dependencies = [
-  ...Object.entries(project.dependencies ?? {}).map(([name, version]) => `- \`${name}\` ${version} (dependency)`),
-  ...Object.entries(project.devDependencies ?? {}).map(([name, version]) => `- \`${name}\` ${version} (devDependency)`),
-].sort((a, b) => a.localeCompare(b));
-const tree = await sourceTree();
-const tests = await testFiles();
 const variables = await envNames();
 const commitSubjects = gitOutput(['log', '-5', '--pretty=format:%s'], '')
   .split(/\r?\n/)
@@ -116,19 +72,7 @@ const generated = [
   'Last 5 commit subjects:',
   bulletList(commitSubjects, 'unknown (git unavailable or no commits)'),
   '',
-  'npm scripts:',
-  bulletList(scripts, 'none'),
-  '',
-  'Dependencies and versions:',
-  bulletList(dependencies, 'none'),
-  '',
-  'src/ tree (maximum two directory levels):',
-  '```text',
-  ...tree,
-  '```',
-  '',
-  'Test files:',
-  bulletList(tests, 'none found'),
+  'Validation commands: `npm run lint`, `npm test`, and `npm run build`.',
   '',
   'Environment variable names from .env.example files (values are not read into this block):',
   bulletList(variables, 'none found'),
