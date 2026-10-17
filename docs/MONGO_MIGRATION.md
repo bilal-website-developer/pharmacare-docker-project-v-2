@@ -24,12 +24,14 @@ This file tracks migration phase deliverables and verification. It does not auth
 
 ## Autopilot step 0 — housekeeping
 
-**Status: VERIFIED (local checks only; Step 0 source fix included).** Branch `feature/mongo-migration` was clean before the Step 0 verification. `src/App.tsx` contains API-mode shell wiring; `vite.config.ts` defaults to Compose API port 3000 and allows a documented host-mode override to 3001. The stock inventory API adapter change contained an unresolved response-type alias; it was corrected to use the imported `StockMovementsResponse` type.
+**Status: VERIFIED (local checks only).** In this session, branch `feature/mongo-migration` was clean before work and 29 commits ahead of its upstream; there was no earlier uncommitted batch to commit. `src/App.tsx` contains API-mode shell wiring; `vite.config.ts` defaults to Compose API port 3000 and allows a documented host-mode override to 3001. Added `.gitattributes` rules for LF `.sh` and CRLF `.ps1` files. Current command evidence:
 
-- `npm.cmd run lint`: passed (frontend and server TypeScript checks).
-- `npm.cmd test`: 243 tests total, 233 passed, 0 failed, 10 skipped. All 10 skipped tests are real-Mongo integration cases; this command did not verify Mongo behavior.
-- `npm.cmd run build`: passed (frontend and server builds). Existing Vite `__dirname` and large-chunk warnings remain.
-- Manual UI tests, production checks, and current-session real-Mongo integration execution remain outstanding.
+- `npm.cmd run lint`: exit 0.
+- `npm.cmd test`: 264 tests total, 253 passed, 0 failed, 11 skipped. The root runner skips the real-Mongo integration tests.
+- `npm.cmd run build`: exit 0. Existing Vite `__dirname` and large-chunk warnings remain.
+- `npm.cmd --prefix server run test:security`: 9 passed, 0 failed, 0 skipped.
+- `docker compose run --rm --no-deps api-test`: 11 real-Mongo integration tests passed, 0 failed, 0 skipped.
+- Manual UI tests and production checks remain outstanding.
 
 ## Autopilot step 1 — Mongo initialization and local Compose health
 
