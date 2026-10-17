@@ -43,6 +43,11 @@ import {
 import { loadShopSettings, updateShopSettings } from './data/shopSettings';
 import type { ShopProfile } from './data/shopSettings';
 import { createCashExpense, loadCashBook } from './data/finance';
+import {
+  loadDashboardSummary,
+  loadSalesReportSummary,
+} from './data/businessReports';
+import type { DashboardSummary, SalesReportSummary } from './data/businessReports';
 import { loadPendingPrintCount } from './data/printRequests';
 import PharmaLogo from './components/PharmaLogo';
 import type { PrintReceiptHandler } from './utils/printWorkflow';
@@ -489,6 +494,10 @@ function PharmacyWorkspace({
   const [ledgerEntries, setLedgerEntries] = useState<Record<string, LedgerEntry[]>>({});
   const [transactions, setTransactions] = useState<CashTransaction[]>([]);
   const [completedSales, setCompletedSales] = useState<CompletedSale[]>([]);
+  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
+  const [dashboardSummaryError, setDashboardSummaryError] = useState('');
+  const [salesReportSummary, setSalesReportSummary] = useState<SalesReportSummary | null>(null);
+  const [salesReportError, setSalesReportError] = useState('');
   const [dataLoadError, setDataLoadError] = useState('');
   const refreshCashBook = React.useCallback(async () => {
     if (getBackend() !== 'api') return;
@@ -543,6 +552,52 @@ function PharmacyWorkspace({
       active = false;
     };
   }, [session?.userId, session?.permissions, refreshCashBook]);
+
+  useEffect(() => {
+    if (!session || getBackend() !== 'api' || activeItem !== 'dashboard') {
+      setDashboardSummary(null);
+      setDashboardSummaryError('');
+      return;
+    }
+    let active = true;
+    setDashboardSummary(null);
+    setDashboardSummaryError('');
+    void loadDashboardSummary()
+      .then((summary) => {
+        if (active) setDashboardSummary(summary);
+      })
+      .catch((error: unknown) => {
+        if (active) setDashboardSummaryError(
+          error instanceof Error ? error.message : 'Could not load the dashboard summary.',
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [session?.userId, session?.permissions, activeItem]);
+
+  useEffect(() => {
+    if (!session || getBackend() !== 'api' || activeItem !== 'reports') {
+      setSalesReportSummary(null);
+      setSalesReportError('');
+      return;
+    }
+    let active = true;
+    setSalesReportSummary(null);
+    setSalesReportError('');
+    void loadSalesReportSummary()
+      .then((summary) => {
+        if (active) setSalesReportSummary(summary);
+      })
+      .catch((error: unknown) => {
+        if (active) setSalesReportError(
+          error instanceof Error ? error.message : 'Could not load the business report.',
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [session?.userId, session?.permissions, activeItem]);
 
   // Global Modals
   const [showTemplatePreview, setShowTemplatePreview] = useState(false);
@@ -741,19 +796,19 @@ function PharmacyWorkspace({
 
   // Calculations for End of Day modal
   const postedSales = completedSales.filter((sale) => sale.status !== 'VOID');
-  const cashSalesPKR =
+  const localCashSalesPKR =
     postedSales
       .filter((s) => s.paymentMethod === 'CASH')
       .reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
 
-  const creditSalesPKR =
+  const localCreditSalesPKR =
     postedSales
       .filter((s) => s.paymentMethod === 'CREDIT')
       .reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
 
-  const totalSalesPKR = postedSales.reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
+  const localTotalSalesPKR = postedSales.reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
 
-  const expensesPKR =
+  const localExpensesPKR =
     transactions
       .filter((t) => t.isOutflow)
       .reduce((sum, t) => sum + t.amountPaisa, 0) / 100;
@@ -761,7 +816,7 @@ function PharmacyWorkspace({
   const hasCompleteSaleCosts = completedSales.every((sale) =>
     sale.items.every((item) => item.costPaisaPerUnit !== null)
   );
-  const totalCostPKR = hasCompleteSaleCosts
+  const totalCostPKR = getBackend() !== 'api' && hasCompleteSaleCosts
     ? postedSales.reduce((sum, sale) =>
         sum + sale.items.reduce(
           (itemSum, item) => itemSum + (item.costPaisaPerUnit ?? 0) * item.quantityInUnit,
@@ -771,8 +826,28 @@ function PharmacyWorkspace({
 
   const grossProfitPKR = totalCostPKR === null
     ? null
-    : Math.max(0, totalSalesPKR - totalCostPKR);
-  const netCashInHandPKR = Math.max(0, cashSalesPKR - expensesPKR);
+    : Math.max(0, localTotalSalesPKR - totalCostPKR);
+  const cashSalesPKR = getBackend() === 'api'
+    ? dashboardSummary?.cashSalesPaisa ?? null
+    : localCashSalesPKR;
+  const creditSalesPKR = getBackend() === 'api'
+    ? dashboardSummary?.creditSalesPaisa ?? null
+    : localCreditSalesPKR;
+  const totalSalesPKR = getBackend() === 'api'
+    ? dashboardSummary?.todaySalesPaisa ?? null
+    : localTotalSalesPKR;
+  const returnsPKR = getBackend() === 'api'
+    ? dashboardSummary?.returnsPaisa ?? null
+    : null;
+  const expensesPKR = getBackend() === 'api'
+    ? dashboardSummary?.expensesPaisa ?? null
+    : localExpensesPKR;
+  const purchasesPKR = getBackend() === 'api'
+    ? dashboardSummary?.cashPurchasesPaisa ?? null
+    : 0;
+  const netCashInHandPKR = getBackend() === 'api'
+    ? dashboardSummary?.expectedDrawerPaisa ?? null
+    : Math.max(0, localCashSalesPKR - localExpensesPKR);
 
   const getPageTitle = (key: NavItemKey): string => {
     switch (key) {
@@ -871,15 +946,20 @@ function PharmacyWorkspace({
           <Suspense fallback={<ScreenLoading />}>
           <>
           {activeItem === 'dashboard' && (
-            <DashboardView
-              sales={completedSales}
-              products={products}
-              customers={customers}
-              currentRole={currentRole}
-              currentUserName={currentUserName}
-              onNavigate={navigateTo}
-              onOpenCloseDay={() => setShowCloseDayModal(true)}
-            />
+            <>
+              {dashboardSummaryError && <p role="alert" className="mb-4 rounded-control border border-danger/30 bg-danger/10 px-4 py-3 text-sm font-semibold text-danger">{dashboardSummaryError}</p>}
+              <DashboardView
+                sales={completedSales}
+                products={products}
+                customers={customers}
+                currentRole={currentRole}
+                currentUserName={currentUserName}
+                apiMode={getBackend() === 'api'}
+                dashboardSummary={dashboardSummary}
+                onNavigate={navigateTo}
+                onOpenCloseDay={() => setShowCloseDayModal(true)}
+              />
+            </>
           )}
 
           {activeItem === 'pos' && (
@@ -984,7 +1064,16 @@ function PharmacyWorkspace({
           )}
 
           {activeItem === 'reports' && (
-            <ReportsScreen sales={completedSales} currentRole={currentRole} />
+            <>
+              {salesReportError && <p role="alert" className="mb-4 rounded-control border border-danger/30 bg-danger/10 px-4 py-3 text-sm font-semibold text-danger">{salesReportError}</p>}
+              <ReportsScreen
+                sales={completedSales}
+                currentRole={currentRole}
+                apiMode={getBackend() === 'api'}
+                businessReport={salesReportSummary}
+                totalOrders={salesReportSummary?.saleCount}
+              />
+            </>
           )}
 
           {activeItem === 'settings' && (
@@ -1058,10 +1147,12 @@ function PharmacyWorkspace({
             cashSalesPKR={cashSalesPKR}
             creditSalesPKR={creditSalesPKR}
             totalSalesPKR={totalSalesPKR}
+            returnsPKR={returnsPKR}
             expensesPKR={expensesPKR}
-            purchasesPKR={0}
+            purchasesPKR={purchasesPKR}
             grossProfitPKR={grossProfitPKR}
             netCashInHandPKR={netCashInHandPKR}
+            shopToday={dashboardSummary?.today}
           />
         </Suspense>
       )}

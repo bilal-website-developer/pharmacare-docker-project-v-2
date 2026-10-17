@@ -1177,24 +1177,46 @@ export function registerPhaseSevenRoutes(
     });
   });
 
-  app.get('/api/dashboard/summary', { preHandler: [requireAuth(authRepository, tokenConfig), requirePermission('reports')] }, async (request, reply) => {
+  app.get('/api/dashboard/summary', { preHandler: [requireAuth(authRepository, tokenConfig)] }, async (request, reply) => {
     const user = caller(request, reply);
     if (!user) return;
+    const canViewFinancialSummary = user.role !== 'cashier' && user.permissions.includes('reports');
+    if (!canViewFinancialSummary && !user.permissions.includes('pos')) {
+      return reply.code(403).send({ error: 'FORBIDDEN' });
+    }
     const shop = await authRepository.findShopById(user.shopId);
     if (!shop) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
-    const today = timezoneToday(shop.timeZone ?? 'Asia/Karachi');
-    const tomorrow = new Date(today.getTime() + 86_400_000);
-    const [sales, returns, stock, lowStockRows, nearExpiry, expenses] = await Promise.all([
+    const timeZone = shop.timeZone ?? 'Asia/Karachi';
+    const today = timezoneToday(timeZone);
+    const todayText = today.toISOString().slice(0, 10);
+    const todayBounds = timezoneDateBounds(timeZone, todayText);
+    const reportNow = new Date();
+    const monthStart = timezoneDateBounds(timeZone, `${todayText.slice(0, 7)}-01`).start;
+    const [sales, monthSales, returns, monthReturns, stock, lowStockRows, nearExpiry, expired, expenses, payments, receivables, drawerTotals, cashPurchases] = await Promise.all([
       database.collection('sales').aggregate([
-        { $match: { shopId: user.shopId, status: 'COMPLETED', soldAt: { $gte: today, $lt: tomorrow } } },
+        { $match: { shopId: user.shopId, status: 'COMPLETED', soldAt: { $gte: todayBounds.start, $lt: reportNow } } },
         { $group: { _id: null, total: { $sum: '$totalPaisa' }, count: { $sum: 1 } } },
       ]).toArray(),
+      database.collection('sales').aggregate([
+        { $match: { shopId: user.shopId, status: 'COMPLETED', soldAt: { $gte: monthStart, $lt: reportNow } } },
+        { $group: { _id: null, total: { $sum: '$totalPaisa' } } },
+      ]).toArray(),
       database.collection('saleReturns').aggregate([
-        { $match: { shopId: user.shopId, status: 'COMPLETED', decidedAt: { $gte: today, $lt: tomorrow } } },
+        { $match: { shopId: user.shopId, status: 'COMPLETED', decidedAt: { $gte: todayBounds.start, $lt: reportNow } } },
+        { $group: { _id: null, total: { $sum: '$refundPaisa' } } },
+      ]).toArray(),
+      database.collection('saleReturns').aggregate([
+        { $match: { shopId: user.shopId, status: 'COMPLETED', decidedAt: { $gte: monthStart, $lt: reportNow } } },
         { $group: { _id: null, total: { $sum: '$refundPaisa' } } },
       ]).toArray(),
       database.collection('stockBatches').aggregate([
-        { $match: { shopId: user.shopId, quantityRemainingBaseUnits: { $gt: Long.ZERO }, status: { $in: ['ACTIVE', 'NEAR_EXPIRY'] }, expiryDate: { $gte: today } } },
+        { $match: {
+          shopId: user.shopId, quantityRemainingBaseUnits: { $gt: Long.ZERO },
+          status: { $in: ['ACTIVE', 'NEAR_EXPIRY'] }, expiryDate: { $gte: today },
+        } },
+        { $lookup: { from: 'medicines', localField: 'medicineId', foreignField: '_id', as: 'medicine' } },
+        { $unwind: '$medicine' },
+        { $match: { 'medicine.shopId': user.shopId, 'medicine.isActive': true } },
         { $group: { _id: null, quantity: { $sum: '$quantityRemainingBaseUnits' } } },
       ]).toArray(),
       database.collection('stockBatches').aggregate([
@@ -1214,27 +1236,78 @@ export function registerPhaseSevenRoutes(
         } },
         { $count: 'count' },
       ]).toArray(),
-      database.collection('stockBatches').countDocuments({
-        shopId: user.shopId, quantityRemainingBaseUnits: { $gt: Long.ZERO },
-        status: { $in: ['ACTIVE', 'NEAR_EXPIRY'] },
-        expiryDate: { $gte: today, $lt: new Date(today.getTime() + 30 * 86_400_000) },
-      }),
+      database.collection('stockBatches').aggregate([
+        { $match: {
+          shopId: user.shopId, quantityRemainingBaseUnits: { $gt: Long.ZERO },
+          status: { $in: ['ACTIVE', 'NEAR_EXPIRY'] },
+          expiryDate: { $gte: today, $lt: new Date(today.getTime() + 30 * 86_400_000) },
+        } },
+        { $lookup: { from: 'medicines', localField: 'medicineId', foreignField: '_id', as: 'medicine' } },
+        { $unwind: '$medicine' },
+        { $match: { 'medicine.shopId': user.shopId, 'medicine.isActive': true } },
+        { $count: 'count' },
+      ]).toArray(),
+      database.collection('stockBatches').aggregate([
+        { $match: {
+          shopId: user.shopId, quantityRemainingBaseUnits: { $gt: Long.ZERO },
+          $or: [{ status: 'EXPIRED' }, { expiryDate: { $lt: today } }],
+        } },
+        { $lookup: { from: 'medicines', localField: 'medicineId', foreignField: '_id', as: 'medicine' } },
+        { $unwind: '$medicine' },
+        { $match: { 'medicine.shopId': user.shopId, 'medicine.isActive': true } },
+        { $count: 'count' },
+      ]).toArray(),
       database.collection('expenses').aggregate([
-        { $match: { shopId: user.shopId, status: 'ACTIVE', occurredAt: { $gte: today, $lt: tomorrow } } },
+        { $match: { shopId: user.shopId, status: 'ACTIVE', occurredAt: { $gte: todayBounds.start, $lt: reportNow } } },
+        { $group: { _id: null, total: { $sum: '$amountPaisa' } } },
+      ]).toArray(),
+      database.collection('salePayments').aggregate([
+        { $match: { shopId: user.shopId, createdAt: { $gte: todayBounds.start, $lt: reportNow }, method: { $in: ['CASH', 'CREDIT'] } } },
+        { $group: { _id: '$method', total: { $sum: '$amountPaisa' } } },
+      ]).toArray(),
+      database.collection('customers').aggregate([
+        { $match: { shopId: user.shopId, deletedAt: null, currentBalancePaisa: { $gt: Long.ZERO } } },
+        { $group: { _id: null, total: { $sum: '$currentBalancePaisa' } } },
+      ]).toArray(),
+      database.collection('cashBookEntries').aggregate([
+        { $match: { shopId: user.shopId, paymentMethod: 'CASH', createdAt: { $gte: todayBounds.start, $lt: reportNow } } },
+        { $group: { _id: '$direction', total: { $sum: '$amountPaisa' } } },
+      ]).toArray(),
+      database.collection('cashBookEntries').aggregate([
+        { $match: {
+          shopId: user.shopId, paymentMethod: 'CASH', direction: 'OUT',
+          entryType: 'PURCHASE_PAYMENT', createdAt: { $gte: todayBounds.start, $lt: reportNow },
+        } },
         { $group: { _id: null, total: { $sum: '$amountPaisa' } } },
       ]).toArray(),
     ]);
     const gross = BigInt(asLong(sales[0]?.total ?? Long.ZERO).toString());
     const refunded = BigInt(asLong(returns[0]?.total ?? Long.ZERO).toString());
-    return reply.send({
-      todaySalesPaisa: (gross - refunded).toString(),
-      grossSalesPaisa: gross.toString(),
-      returnsPaisa: refunded.toString(),
+    const activity = {
+      today: todayText,
       saleCount: Number(sales[0]?.count ?? 0),
       sellableStockBaseUnits: asLong(stock[0]?.quantity ?? Long.ZERO).toString(),
       lowStockMedicines: Number(lowStockRows[0]?.count ?? 0),
-      nearExpiryBatches: nearExpiry,
+      nearExpiryBatches: Number(nearExpiry[0]?.count ?? 0),
+      expiredBatches: Number(expired[0]?.count ?? 0),
+    };
+    if (!canViewFinancialSummary) return reply.send(activity);
+    const monthGross = BigInt(asLong(monthSales[0]?.total ?? Long.ZERO).toString());
+    const monthRefunded = BigInt(asLong(monthReturns[0]?.total ?? Long.ZERO).toString());
+    const cashIn = BigInt(asLong(drawerTotals.find((entry) => entry._id === 'IN')?.total ?? Long.ZERO).toString());
+    const cashOut = BigInt(asLong(drawerTotals.find((entry) => entry._id === 'OUT')?.total ?? Long.ZERO).toString());
+    return reply.send({
+      ...activity,
+      todaySalesPaisa: (gross - refunded).toString(),
+      grossSalesPaisa: gross.toString(),
+      returnsPaisa: refunded.toString(),
       expensesPaisa: asLong(expenses[0]?.total ?? Long.ZERO).toString(),
+      monthNetSalesPaisa: (monthGross - monthRefunded).toString(),
+      cashSalesPaisa: asLong(payments.find((payment) => payment._id === 'CASH')?.total ?? Long.ZERO).toString(),
+      creditSalesPaisa: asLong(payments.find((payment) => payment._id === 'CREDIT')?.total ?? Long.ZERO).toString(),
+      receivablesPaisa: asLong(receivables[0]?.total ?? Long.ZERO).toString(),
+      cashPurchasesPaisa: asLong(cashPurchases[0]?.total ?? Long.ZERO).toString(),
+      expectedDrawerPaisa: (cashIn - cashOut).toString(),
     });
   });
 

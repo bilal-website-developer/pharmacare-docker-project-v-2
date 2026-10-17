@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { BatchStatus, CompletedSale, Product, Customer, UserRole } from '../types/pharmacy';
 import { salesForPeriod } from '../utils/salesReport';
+import { formatPaisa } from '../data/businessReports';
+import type { DashboardSummary } from '../data/businessReports';
 
 interface DashboardViewProps {
   sales: CompletedSale[];
@@ -23,6 +25,8 @@ interface DashboardViewProps {
   customers: Customer[];
   currentRole: UserRole;
   currentUserName: string;
+  apiMode: boolean;
+  dashboardSummary?: DashboardSummary | null;
   onNavigate: (tab: any) => void;
   onOpenCloseDay: () => void;
 }
@@ -33,6 +37,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   customers,
   currentRole,
   currentUserName,
+  apiMode,
+  dashboardSummary,
   onNavigate,
   onOpenCloseDay,
 }) => {
@@ -56,17 +62,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const todaySales = salesForPeriod(sales, 'today');
   const monthlySales = salesForPeriod(sales, 'month');
 
-  const todaySalesPKR = todaySales.reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
-  const cashSalesPKR =
+  const localTodaySalesPKR = todaySales.reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
+  const localCashSalesPKR =
     todaySales
       .filter((s) => s.paymentMethod === 'CASH')
       .reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
-  const creditSalesPKR =
+  const localCreditSalesPKR =
     todaySales
       .filter((s) => s.paymentMethod === 'CREDIT')
       .reduce((sum, s) => sum + s.totalPaisa, 0) / 100;
 
-  const todayProfitPKR = canViewProfit && todaySales.every((sale) =>
+  const localTodayProfitPKR = canViewProfit && todaySales.every((sale) =>
     sale.items.every((item) => item.costPaisaPerUnit !== null)
   )
     ? todaySales.reduce(
@@ -81,11 +87,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       ) / 100
     : null;
 
-  const totalReceivablesPKR =
+  const localTotalReceivablesPKR =
     customers.reduce((sum, c) => sum + c.currentBalancePaisa, 0) / 100;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const nearExpiryCount = products.reduce(
+  const localNearExpiryCount = products.reduce(
     (sum, product) =>
       sum +
       product.batches.filter((batch) => {
@@ -99,7 +105,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       }).length,
     0
   );
-  const expiredCount = products.reduce(
+  const localExpiredCount = products.reduce(
     (sum, product) =>
       sum +
       product.batches.filter((batch) => {
@@ -111,10 +117,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     0
   );
 
-  const lowStockCount = products.filter((p) => {
+  const localLowStockCount = products.filter((p) => {
     const totalQty = p.batches.reduce((sum, b) => sum + b.quantitySmallestUnit, 0);
     return totalQty <= p.minStockAlert;
   }).length;
+  const todaySalesPKR = apiMode
+    ? toRupees(dashboardSummary?.todaySalesPaisa)
+    : localTodaySalesPKR;
+  const monthlySalesPKR = apiMode
+    ? toRupees(dashboardSummary?.monthNetSalesPaisa)
+    : monthlySales.reduce((sum, sale) => sum + sale.totalPaisa, 0) / 100;
+  const todayProfitPKR = apiMode ? null : localTodayProfitPKR;
+  const cashSalesPKR = apiMode
+    ? toRupees(dashboardSummary?.cashSalesPaisa)
+    : localCashSalesPKR;
+  const creditSalesPKR = apiMode
+    ? toRupees(dashboardSummary?.creditSalesPaisa)
+    : localCreditSalesPKR;
+  const totalReceivablesPKR = apiMode
+    ? toRupees(dashboardSummary?.receivablesPaisa)
+    : localTotalReceivablesPKR;
+  const nearExpiryCount = apiMode ? dashboardSummary?.nearExpiryBatches ?? null : localNearExpiryCount;
+  const expiredCount = apiMode ? dashboardSummary?.expiredBatches ?? null : localExpiredCount;
+  const lowStockCount = apiMode ? dashboardSummary?.lowStockMedicines ?? null : localLowStockCount;
+  const invoiceCount = apiMode ? dashboardSummary?.saleCount ?? null : todaySales.length;
+  const targetProgress = salesTarget !== null && todaySalesPKR !== null
+    ? Math.min(100, Math.round((todaySalesPKR / salesTarget) * 100))
+    : null;
+
+  function toRupees(paisa?: string): number | null {
+    if (paisa === undefined) return null;
+    const amount = Number(BigInt(paisa)) / 100;
+    return Number.isSafeInteger(Number(BigInt(paisa))) ? amount : null;
+  }
+
+  function currencyLabel(paisa: string | undefined, value: number | null): string {
+    return apiMode
+      ? paisa === undefined ? 'Unavailable' : formatPaisa(paisa)
+      : value === null ? 'Unavailable' : `Rs. ${value.toFixed(0)}`;
+  }
 
   return (
     <div className="space-y-6">
@@ -155,7 +196,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="mt-3">
             <span className="text-[11px] font-medium text-slate-500 block">Today's Sales (Rs)</span>
             <span className="text-xl font-black text-slate-900 font-mono tracking-tight">
-              Rs. {todaySalesPKR.toFixed(0)}
+              {currencyLabel(dashboardSummary?.todaySalesPaisa, todaySalesPKR)}
             </span>
           </div>
         </div>
@@ -180,7 +221,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </span>
             ) : (
               <span className="text-sm font-bold text-slate-700 flex items-center gap-1">
-                <Activity className="w-3.5 h-3.5" /> {todaySales.length} invoices
+                <Activity className="w-3.5 h-3.5" /> {invoiceCount ?? '—'} invoices
               </span>
             )}
           </div>
@@ -199,7 +240,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="mt-3">
             <span className="text-[11px] font-medium text-slate-500 block">Monthly Sales (Rs)</span>
             <span className="text-xl font-black text-slate-900 font-mono tracking-tight">
-              Rs. {monthlySales.reduce((sum, sale) => sum + sale.totalPaisa, 0) / 100}
+              {currencyLabel(dashboardSummary?.monthNetSalesPaisa, monthlySalesPKR)}
             </span>
           </div>
         </div>
@@ -216,7 +257,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="mt-3">
             <span className="text-[11px] font-medium text-muted block">Near-Expiry Batches</span>
-            <span className="text-xl font-black text-text font-mono">{nearExpiryCount}</span>
+            <span className="text-xl font-black text-text font-mono">{nearExpiryCount ?? '—'}</span>
           </div>
         </div>
 
@@ -231,7 +272,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="mt-3">
             <span className="text-[11px] font-medium text-muted block">Expired Batches</span>
-            <span className="text-xl font-black text-danger font-mono">{expiredCount}</span>
+            <span className="text-xl font-black text-danger font-mono">{expiredCount ?? '—'}</span>
           </div>
         </div>
 
@@ -250,7 +291,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               Total Receivables (Rs)
             </span>
             <span className="font-mono text-xl font-black tracking-tight text-text">
-              Rs. {totalReceivablesPKR.toFixed(0)}
+              {currencyLabel(dashboardSummary?.receivablesPaisa, totalReceivablesPKR)}
             </span>
           </div>
         </div>
@@ -269,10 +310,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className="block text-[11px] font-medium text-muted">Low Stock Products</span>
             <span
               className={`text-xl font-black font-mono tracking-tight ${
-                lowStockCount > 0 ? 'text-danger' : 'text-text'
+                lowStockCount !== null && lowStockCount > 0 ? 'text-danger' : 'text-text'
               }`}
             >
-              {lowStockCount}
+              {lowStockCount ?? '—'}
             </span>
           </div>
         </div>
@@ -283,13 +324,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="flex items-center gap-2">
           <span className="h-3 w-3 rounded-xs bg-primary" />
           <span className="font-semibold text-muted">Cash Sales</span>
-          <span className="font-mono font-bold text-text">Rs. {cashSalesPKR.toFixed(0)}</span>
+          <span className="font-mono font-bold text-text">
+            {currencyLabel(dashboardSummary?.cashSalesPaisa, cashSalesPKR)}
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <span className="h-3 w-3 rounded-xs bg-warning" />
           <span className="font-semibold text-muted">Credit</span>
           <span className="font-mono font-bold text-text">
-            Rs. {creditSalesPKR.toFixed(0)}
+            {currencyLabel(dashboardSummary?.creditSalesPaisa, creditSalesPKR)}
           </span>
         </div>
       </div>
@@ -302,25 +345,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className="font-bold text-text">Daily Sales Target</span>
             <span className="text-[11px] text-muted">
               {salesTarget
-                ? `Target: Rs ${salesTarget.toLocaleString('en-PK')} · Achieved: Rs ${todaySalesPKR.toLocaleString('en-PK')} (${Math.min(
-                    100,
-                    Math.round((todaySalesPKR / salesTarget) * 100)
-                  )}%)`
+                ? targetProgress === null || todaySalesPKR === null
+                  ? `Target: Rs ${salesTarget.toLocaleString('en-PK')} · Sales total unavailable`
+                  : `Target: Rs ${salesTarget.toLocaleString('en-PK')} · Achieved: Rs ${todaySalesPKR.toLocaleString('en-PK')} (${targetProgress}%)`
                 : 'No target set. Set a daily goal to track progress.'}
             </span>
           </div>
-          {salesTarget && (
+          {salesTarget && targetProgress !== null && (
             <div
               className="h-2 w-full overflow-hidden rounded-full bg-surface"
               role="progressbar"
               aria-label="Daily sales target progress"
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={Math.min(100, Math.round((todaySalesPKR / salesTarget) * 100))}
+              aria-valuenow={targetProgress}
             >
               <div
                 className="h-full rounded-full bg-primary"
-                style={{ width: `${Math.min(100, (todaySalesPKR / salesTarget) * 100)}%` }}
+                style={{ width: `${targetProgress}%` }}
               />
             </div>
           )}

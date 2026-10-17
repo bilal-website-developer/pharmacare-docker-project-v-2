@@ -4,7 +4,7 @@
 **Status:** Phase 1 proposed contract for owner review; implementation status and gaps are tracked in [MongoDB Migration](./MONGO_MIGRATION.md).
 **Basis:** [Phase 0 inventory](./MONGO_MIGRATION_INVENTORY.md), the current role and permission decisions in [Project Context](./PROJECT_CONTEXT.md), and the approved one-user/one-shop model. The existing Supabase behavior is not proof of deployed behavior.
 
-**Implementation note (Phase 5):** The phase tracker records the locally implemented purchase/stock API. Its persisted purchase status/payment values are lowercase (`posted`/`void`, `cash`/`credit`), purchase items store `medicineCodeSnapshot`, and actual endpoints use `/api/purchases/...` and `/api/stock/...`. Status refresh currently uses UTC calendar dates. Request idempotency records from this proposed design are not yet implemented for these writes; see `MONGO_MIGRATION.md`.
+**Implementation note:** Implemented purchase/stock endpoints use `/api/purchases/...` and `/api/stock/...`; persisted purchase status/payment values are lowercase (`posted`/`void`, `cash`/`credit`), and purchase items store `medicineCodeSnapshot`. Stock status, expiry and sales/dashboard date ranges use the authenticated shop's timezone (default `Asia/Karachi`); see `MONGO_MIGRATION.md` for current evidence. Business write idempotency is implemented with the documented post-transaction response-persistence crash window.
 
 ## 1. Design invariants
 

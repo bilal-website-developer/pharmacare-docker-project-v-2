@@ -4,7 +4,7 @@ import test, { after, before } from 'node:test';
 import { Long, MongoClient, ObjectId } from 'mongodb';
 import { createAccessToken } from '../dist/auth-crypto.js';
 import { createApp } from '../dist/app.js';
-import { timezoneToday } from '../dist/business-time.js';
+import { timezoneDateBounds, timezoneToday } from '../dist/business-time.js';
 import { loadConfig } from '../dist/config.js';
 import { MongoCatalogRepository } from '../dist/catalog-repository.js';
 import { MongoStockRepository } from '../dist/stock-repository.js';
@@ -685,7 +685,11 @@ test('Mongo returns enforce sold quantities, prevent double processing, and reco
       const cashierDashboard = await app.inject({
         method: 'GET', url: '/api/dashboard/summary', headers: cashierHeaders,
       });
-      assert.equal(cashierDashboard.statusCode, 403);
+      assert.equal(cashierDashboard.statusCode, 200, cashierDashboard.body);
+      assert.deepEqual(Object.keys(cashierDashboard.json()).sort(), [
+        'today', 'saleCount', 'sellableStockBaseUnits', 'lowStockMedicines',
+        'nearExpiryBatches', 'expiredBatches',
+      ].sort());
       const overReturn = await app.inject({
         method: 'POST',
         url: `/api/sales/${sale._id.toHexString()}/returns`,
@@ -788,6 +792,23 @@ test('Mongo returns enforce sold quantities, prevent double processing, and reco
       assert.equal(report.json().grossSalesPaisa, '150');
       assert.equal(report.json().returnsPaisa, '150');
       assert.equal(report.json().netSalesPaisa, '0');
+      const businessDay = timezoneToday('Asia/Karachi').toISOString().slice(0, 10);
+      const businessDayStart = timezoneDateBounds('Asia/Karachi', businessDay).start;
+      await database.collection('sales').updateOne(
+        { _id: sale._id, shopId },
+        { $set: { soldAt: new Date(businessDayStart.getTime() - 1) } },
+      );
+      const beforeShopMidnight = await app.inject({
+        method: 'GET', url: '/api/dashboard/summary', headers: headers(),
+      });
+      assert.equal(beforeShopMidnight.statusCode, 200, beforeShopMidnight.body);
+      assert.equal(beforeShopMidnight.json().grossSalesPaisa, '0');
+      assert.equal(beforeShopMidnight.json().returnsPaisa, '150');
+      assert.equal(beforeShopMidnight.json().todaySalesPaisa, '-150');
+      await database.collection('sales').updateOne(
+        { _id: sale._id, shopId },
+        { $set: { soldAt: businessDayStart } },
+      );
       const dashboard = await app.inject({
         method: 'GET', url: '/api/dashboard/summary', headers: headers(),
       });
@@ -795,7 +816,15 @@ test('Mongo returns enforce sold quantities, prevent double processing, and reco
       assert.equal(dashboard.json().grossSalesPaisa, '150');
       assert.equal(dashboard.json().returnsPaisa, '150');
       assert.equal(dashboard.json().todaySalesPaisa, '0');
+      assert.equal(dashboard.json().monthNetSalesPaisa, '0');
+      assert.equal(dashboard.json().today, businessDay);
       assert.equal(dashboard.json().sellableStockBaseUnits, '9');
+      assert.equal(typeof dashboard.json().receivablesPaisa, 'string');
+      assert.equal(dashboard.json().cashPurchasesPaisa, '0');
+      assert.equal(dashboard.json().expectedDrawerPaisa, '0');
+      assert.equal('costPaisa' in dashboard.json(), false);
+      assert.equal('profitPaisa' in dashboard.json(), false);
+      assert.equal('marginPaisa' in dashboard.json(), false);
       const cashBook = await app.inject({ method: 'GET', url: '/api/cash-book', headers: headers() });
       assert.equal(cashBook.statusCode, 200, cashBook.body);
       assert.equal(cashBook.json().totals.inflowPaisa, '150');

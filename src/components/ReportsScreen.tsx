@@ -1,13 +1,24 @@
 import React from 'react';
 import { EyeOff, ShoppingBag } from 'lucide-react';
 import { CompletedSale, UserRole } from '../types/pharmacy';
+import { formatPaisa } from '../data/businessReports';
+import type { SalesReportSummary } from '../data/businessReports';
 
 interface ReportsScreenProps {
   sales: CompletedSale[];
   currentRole: UserRole;
+  apiMode?: boolean;
+  businessReport?: SalesReportSummary | null;
+  totalOrders?: number;
 }
 
-export const ReportsScreen: React.FC<ReportsScreenProps> = ({ sales, currentRole }) => {
+export const ReportsScreen: React.FC<ReportsScreenProps> = ({
+  sales,
+  currentRole,
+  apiMode = false,
+  businessReport,
+  totalOrders,
+}) => {
   const canSeeProfit = currentRole === UserRole.ADMIN || currentRole === UserRole.SUPER_ADMIN || currentRole === UserRole.ACCOUNTANT;
 
   const postedSales = sales.filter((sale) => sale.status !== 'VOID');
@@ -51,14 +62,22 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ sales, currentRole
         <div className="report-stat-card bg-white p-5 rounded-xl border border-emerald-200 shadow-xs">
           <span className="text-xs font-semibold text-emerald-700">Gross Sales Revenue</span>
           <div className="report-stat-value text-2xl font-bold font-mono text-emerald-950 mt-1">
-            Rs {(totalRevenuePaisa / 100).toFixed(2)}
+            {businessReport
+              ? formatPaisa(businessReport.grossSalesPaisa)
+              : apiMode ? 'Unavailable' : `Rs ${(totalRevenuePaisa / 100).toFixed(2)}`}
           </div>
-          <span className="text-[11px] text-emerald-600">Total processed counter sales</span>
+          <span className="text-[11px] text-emerald-600">
+            {businessReport
+              ? `Returns: ${formatPaisa(businessReport.returnsPaisa)} · Net: ${formatPaisa(businessReport.netSalesPaisa)}`
+              : apiMode ? 'Report data is unavailable.' : 'Total processed counter sales'}
+          </span>
         </div>
 
         <div className="report-stat-card bg-white p-5 rounded-xl border border-emerald-200 shadow-xs">
           <span className="text-xs font-semibold text-emerald-700">Invoices Processed</span>
-          <div className="report-stat-value text-2xl font-bold font-mono text-emerald-950 mt-1">{postedSales.length}</div>
+          <div className="report-stat-value text-2xl font-bold font-mono text-emerald-950 mt-1">
+            {businessReport?.saleCount ?? (apiMode ? '—' : postedSales.length)}
+          </div>
           <span className="text-[11px] text-emerald-600">Sequential receipt numbers</span>
         </div>
 
@@ -93,7 +112,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ sales, currentRole
           <h3 className="font-bold text-sm text-emerald-950 flex items-center gap-2">
             <ShoppingBag className="w-4 h-4 text-emerald-700" /> Recent Sales History
           </h3>
-          <span className="text-xs text-emerald-700">{sales.length} total orders</span>
+          <span className="text-xs text-emerald-700">{totalOrders ?? (apiMode ? '—' : sales.length)} total orders</span>
         </div>
 
         <div className="overflow-x-auto">
