@@ -112,7 +112,7 @@ export interface CatalogRepository {
     audit: (before: CatalogRecord, after: CatalogRecord) => AuditRecord,
   ): Promise<CatalogRecord | null>;
   listTrash(shopId: ObjectId, entityType: CatalogEntityType | undefined, page: number, pageSize: number): Promise<{ rows: TrashRecord[]; total: number }>;
-  latestCosts(shopId: ObjectId, medicineIds: ObjectId[]): Promise<Map<string, string>>;
+  latestCosts(shopId: ObjectId, medicineIds: ObjectId[], today: Date): Promise<Map<string, string>>;
   defaultUnits(shopId: ObjectId, medicineIds: ObjectId[]): Promise<Map<string, CatalogRecord>>;
   assignBarcode(shopId: ObjectId, medicineId: ObjectId, unitId: ObjectId | undefined, actorId: ObjectId, audit: AuditRecord): Promise<string>;
   mergeNamed(
@@ -702,10 +702,8 @@ export class MongoCatalogRepository implements CatalogRepository {
     return { rows, total };
   }
 
-  async latestCosts(shopId: ObjectId, medicineIds: ObjectId[]): Promise<Map<string, string>> {
+  async latestCosts(shopId: ObjectId, medicineIds: ObjectId[], today: Date): Promise<Map<string, string>> {
     if (medicineIds.length === 0) return new Map();
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
     const rows = await this.database.collection<{
       _id: ObjectId;
       unitCostPaisaPerBaseUnit: { toString(): string } | null;

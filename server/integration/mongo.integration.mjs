@@ -6,6 +6,7 @@ import { createAccessToken } from '../dist/auth-crypto.js';
 import { createApp } from '../dist/app.js';
 import { timezoneToday } from '../dist/business-time.js';
 import { loadConfig } from '../dist/config.js';
+import { MongoCatalogRepository } from '../dist/catalog-repository.js';
 import { MongoStockRepository } from '../dist/stock-repository.js';
 import { MongoSalesRepository } from '../dist/sales-repository.js';
 
@@ -494,6 +495,33 @@ test('Mongo unique indexes enforce per-shop medicine codes and barcode claims', 
   });
 });
 
+test('Mongo product cost lookup applies the shop-local expiry date', { skip: !enabled }, async () => {
+  await withFixture(async ({ shopId, medicineId }) => {
+    await database.collection('stockBatches').insertOne({
+      _id: new ObjectId(),
+      shopId,
+      medicineId,
+      quantityRemainingBaseUnits: Long.ONE,
+      expiryDate: new Date('2026-10-14T00:00:00.000Z'),
+      receivedDate: new Date('2026-01-01T00:00:00.000Z'),
+      unitCostPaisaPerBaseUnit: Long.fromInt(1234),
+    });
+    const repository = new MongoCatalogRepository(client, config.mongoDbName);
+    const beforeMidnight = await repository.latestCosts(
+      shopId,
+      [medicineId],
+      timezoneToday('Asia/Karachi', new Date('2026-10-14T18:59:59.999Z')),
+    );
+    const afterMidnight = await repository.latestCosts(
+      shopId,
+      [medicineId],
+      timezoneToday('Asia/Karachi', new Date('2026-10-14T19:00:00.000Z')),
+    );
+    assert.equal(beforeMidnight.get(medicineId.toHexString()), '1234');
+    assert.equal(afterMidnight.has(medicineId.toHexString()), false);
+  });
+});
+
 test('parallel Mongo stock adjustments allow exactly one request to consume the remaining stock', { skip: !enabled }, async () => {
   await withFixture(async ({ shopId, actor, input, suffix }) => {
     const repository = new MongoStockRepository(client, config.mongoDbName);
@@ -927,7 +955,9 @@ test('Mongo expense, settings, print approval and sale void workflows persist wi
       assert.equal(expenseVoid.statusCode, 200, expenseVoid.body);
       const cashBook = await app.inject({ method: 'GET', url: '/api/cash-book', headers: headers() });
       assert.equal(cashBook.statusCode, 200, cashBook.body);
-      assert.equal(cashBook.json().totals.expectedDrawerPaisa, '0');
+      assert.equal(cashBook.json().totals.inflowPaisa, '1250');
+      assert.equal(cashBook.json().totals.outflowPaisa, '650');
+      assert.equal(cashBook.json().totals.expectedDrawerPaisa, '600');
       assert.equal(await database.collection('auditLogs').countDocuments({
         shopId, event: 'print.marked_printed',
       }), 1);

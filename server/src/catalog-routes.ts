@@ -123,6 +123,26 @@ function requiredCaller(request: FastifyRequest, reply: FastifyReply): UserRecor
   return request.authUser;
 }
 
+async function callerShopToday(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  authRepository: PharmacyRepository,
+  caller: UserRecord,
+): Promise<Date | null> {
+  const shop = await authRepository.findShopById(caller.shopId);
+  if (!shop || shop.status !== 'ACTIVE') {
+    await reply.code(401).send({ error: 'UNAUTHENTICATED' });
+    return null;
+  }
+  try {
+    return timezoneToday(shop.timeZone ?? 'Asia/Karachi');
+  } catch {
+    request.log.error({ event: 'invalid_shop_timezone', shopId: caller.shopId.toHexString() });
+    await reply.code(500).send({ error: 'INTERNAL_ERROR' });
+    return null;
+  }
+}
+
 function duplicateResponse(error: unknown, reply: FastifyReply): boolean {
   if (typeof error === 'object' && error !== null && 'code' in error && error.code === 11000) {
     void reply.code(409).send({ error: 'DUPLICATE_VALUE' });
@@ -562,7 +582,12 @@ export function registerCatalogRoutes(
     const query = parsed.data;
     const result = await repository.list(makeListOptions('medicines', caller.shopId, query));
     const showCost = canViewCost(caller.role, caller.permissions);
-    const costMap = showCost ? await repository.latestCosts(caller.shopId, result.rows.map((row) => row._id)) : new Map();
+    let costMap = new Map<string, string>();
+    if (showCost) {
+      const today = await callerShopToday(request, reply, authRepository, caller);
+      if (!today) return;
+      costMap = await repository.latestCosts(caller.shopId, result.rows.map((row) => row._id), today);
+    }
     return reply.send({
       items: result.rows.map((record) => toDto(
         record,
@@ -583,7 +608,12 @@ export function registerCatalogRoutes(
     const medicine = await repository.get('medicines', caller.shopId, objectId(parsed.data));
     if (!medicine) return reply.code(404).send({ error: 'NOT_FOUND' });
     const showCost = canViewCost(caller.role, caller.permissions);
-    const cost = showCost ? await repository.latestCosts(caller.shopId, [medicine._id]) : new Map();
+    let cost: Map<string, string> = new Map();
+    if (showCost) {
+      const today = await callerShopToday(request, reply, authRepository, caller);
+      if (!today) return;
+      cost = await repository.latestCosts(caller.shopId, [medicine._id], today);
+    }
     return reply.send(toDto(medicine, 'medicines', showCost ? cost.get(medicine._id.toHexString()) : undefined));
   });
 
@@ -1006,7 +1036,12 @@ export function registerCatalogRoutes(
       if (nextPage.rows.length === 0) break;
       records.push(...nextPage.rows);
     }
-    const costMap = showCost ? await repository.latestCosts(caller.shopId, records.map((row) => row._id)) : new Map();
+    let costMap = new Map<string, string>();
+    if (showCost) {
+      const today = await callerShopToday(request, reply, authRepository, caller);
+      if (!today) return;
+      costMap = await repository.latestCosts(caller.shopId, records.map((row) => row._id), today);
+    }
     const header = [...CSV_HEADERS, ...(showCost ? ['latestCostPaisa'] : [])].map(escapeCsvCell).join(',');
     const lines = records.map((record) => exportCsvRow(
       record,

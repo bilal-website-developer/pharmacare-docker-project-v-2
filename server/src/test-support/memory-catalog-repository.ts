@@ -331,7 +331,7 @@ export class MemoryCatalogRepository implements CatalogRepository {
     return { rows: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length };
   }
 
-  async latestCosts(shopId: ObjectId, medicineIds: ObjectId[]): Promise<Map<string, string>> {
+  async latestCosts(shopId: ObjectId, medicineIds: ObjectId[], _today: Date): Promise<Map<string, string>> {
     return new Map(medicineIds.flatMap((id) => {
       const cost = this.costs.get(`${shopId.toHexString()}:${id.toHexString()}`);
       return cost === undefined ? [] : [[id.toHexString(), cost]];

@@ -119,6 +119,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 - 2026-10-17 — Step 0 revalidation corrected the Stock Inventory response type alias; lint and build passed, full suite 243 total/233 passed/0 failed/10 skipped (all real-Mongo cases). Compose is currently up locally; manual UI and migration acceptance remain open.
 - 2026-10-17 — Rebuilt and reran `mongo-init` without volume changes; it logged replica-set/app-user and index readiness, exited 0, and Compose reported Mongo/API/web healthy. The proxied `/api/health` returned HTTP 200 with database `ok`; integration suite still needs its dedicated run.
+- 2026-10-17 — Step 2 real-Mongo Compose suite passed 11/11, 0 failed/skipped. Root lint/build passed; full suite 244 total/233 passed/0 failed/11 skipped (Mongo cases are intentionally skipped outside Compose). Fixed product latest-cost expiry filtering to use shop-local today and corrected cash-book reconciliation expectations; API rebuilt and proxied health returned 200 after startup. Owner bootstrap instructions already exist. The idempotency response persistence crash window remains documented.
 - 2026-10-17 — Wired Returns search/request/review/process through strict Mongo API adapters, returning shop-local date and no-cost DTOs; focused tests 3/3, full suite 227 passed/0 failed/10 skipped, lint/build passed. Manual UI and Compose acceptance remain open.
 - 2026-10-17 — Wired purchase entry/history, details, void and filtered export through strict Mongo DTO adapters; purchase tests 5/5, stock API tests 14/14, full suite 233 passed/0 failed/10 skipped, lint/build passed. Manual UI and Compose acceptance remain open.
 - 2026-10-17 — Wired Manage Users CRUD and self-service password change through API adapters, retaining Supabase fallback; focused tests 11/11, full suite 224 passed/0 failed/10 skipped, lint/build passed. Manual browser and Compose route acceptance remain open.
@@ -144,15 +145,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-17T07:47:36.203Z
+Generated at (UTC): 2026-10-17T08:00:35.165Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- docs: record mongo init runtime verification
 - fix: validate stock inventory API wiring
 - feat: API client, session and stock alerts (Phase 8 batch 1)
 - feat: wire purchases and purchase history to Mongo API
 - feat: wire returns workflow to Mongo API
-- docs: refresh project context after Manage Users
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`
