@@ -24,7 +24,12 @@ This file tracks migration phase deliverables and verification. It does not auth
 
 ## Autopilot step 0 — housekeeping
 
-**Status: VERIFIED (local checks only).** `npm run lint` and `npm run build` passed. `npm run test:api-client` passed 4/4. `npm test` passed 184 tests, failed 0, skipped 7 (all real-Mongo integration tests; not Mongo runtime verification). The Vite build emitted existing `__dirname` and large-chunk warnings. Manual UI tests and live Mongo/Docker verification remain outstanding.
+**Status: VERIFIED (local checks only; Step 0 source fix included).** Branch `feature/mongo-migration` was clean before the Step 0 verification. `src/App.tsx` contains API-mode shell wiring; `vite.config.ts` defaults to Compose API port 3000 and allows a documented host-mode override to 3001. The stock inventory API adapter change contained an unresolved response-type alias; it was corrected to use the imported `StockMovementsResponse` type.
+
+- `npm.cmd run lint`: passed (frontend and server TypeScript checks).
+- `npm.cmd test`: 243 tests total, 233 passed, 0 failed, 10 skipped. All 10 skipped tests are real-Mongo integration cases; this command did not verify Mongo behavior.
+- `npm.cmd run build`: passed (frontend and server builds). Existing Vite `__dirname` and large-chunk warnings remain.
+- Manual UI tests, production checks, and current-session real-Mongo integration execution remain outstanding.
 
 ## Autopilot step 1 — Mongo initialization and local Compose health
 

@@ -8,7 +8,7 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging are being added while legacy Supabase paths remain available. Phases 0–7 have server-side implementation; Phase 8 has API wiring for auth/session, Stock Alerts, Suppliers, POS catalog/settings/sales, Customer Ledger, Sales History, Master Data, Cash Book/expenses, Print Requests, Manage Users, Returns, Purchases, and Purchase History. Remaining screen cut-over, manual UI acceptance, and production verification are open.
 
-- Latest modules: Manage Users and Returns use authenticated API routes with strict DTO validation; Supabase fallback remains available when `VITE_BACKEND=supabase`.
+- Latest modules: Stock Inventory batches, movement history, adjustments, expiry buckets, and overview use typed API adapters; Supabase fallback remains available when `VITE_BACKEND=supabase`.
 - Step 0 housekeeping: fixed the Vite proxy target to the Docker API default (`:3000`), kept a `VITE_API_PROXY_TARGET` override for direct host-mode Fastify dev on `:3001`, and documented the intended Docker vs. host API port split.
 
 ## How to run
@@ -117,6 +117,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
+- 2026-10-17 — Step 0 revalidation corrected the Stock Inventory response type alias; lint and build passed, full suite 243 total/233 passed/0 failed/10 skipped (all real-Mongo cases). Compose is currently up locally; manual UI and migration acceptance remain open.
 - 2026-10-17 — Wired Returns search/request/review/process through strict Mongo API adapters, returning shop-local date and no-cost DTOs; focused tests 3/3, full suite 227 passed/0 failed/10 skipped, lint/build passed. Manual UI and Compose acceptance remain open.
 - 2026-10-17 — Wired purchase entry/history, details, void and filtered export through strict Mongo DTO adapters; purchase tests 5/5, stock API tests 14/14, full suite 233 passed/0 failed/10 skipped, lint/build passed. Manual UI and Compose acceptance remain open.
 - 2026-10-17 — Wired Manage Users CRUD and self-service password change through API adapters, retaining Supabase fallback; focused tests 11/11, full suite 224 passed/0 failed/10 skipped, lint/build passed. Manual browser and Compose route acceptance remain open.
@@ -142,15 +143,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep factual claims grounded in current code/docs; write **unknown** where verification is missing.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-17T06:11:53.282Z
+Generated at (UTC): 2026-10-17T07:42:59.719Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: API client, session and stock alerts (Phase 8 batch 1)
 - feat: wire purchases and purchase history to Mongo API
 - feat: wire returns workflow to Mongo API
 - docs: refresh project context after Manage Users
 - feat: wire Manage Users to Mongo API
-- feat: wire print requests to Mongo API
 
 npm scripts:
 - - `dev`: `vite --port=3000 --host=0.0.0.0`

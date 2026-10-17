@@ -41,7 +41,7 @@ type StockSort = 'medicine_asc' | 'medicine_desc' | 'batch_asc' | 'batch_desc' |
   | 'quantity_asc' | 'quantity_desc' | 'cost_asc' | 'cost_desc' | 'value_asc' | 'value_desc';
 type ExpiryBucketKey = 'expired' | '0-30' | '31-60' | '61-90' | '90+';
 
-type StockMovementRow = StockInventoryMovements['rows'][number];
+type StockMovementRow = StockMovementsResponse['rows'][number];
 type StockExpiryBucketsResponse = { buckets: StockExpiryBucket[] };
 
 const BATCH_TABS: readonly { label: string; value: BatchTab }[] = [
