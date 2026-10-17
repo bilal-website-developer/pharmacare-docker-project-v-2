@@ -612,6 +612,17 @@ export class MongoStockRepository implements StockRepository {
           after: { status: after.status, reason: after.voidReason },
           occurredAt: now,
         }, { session });
+        await this.database.collection('trashEvents').insertOne({
+          shopId,
+          actorId: actor._id,
+          entityId: purchaseId,
+          entityType: 'purchase',
+          action: 'voided',
+          displayName: purchase.purchaseNumber,
+          role: actor.role,
+          occurredAt: now,
+          reason: reason.trim(),
+        }, { session });
         await this.transactionCheckpoint('purchase_void.after_audit');
         voided = after;
       });

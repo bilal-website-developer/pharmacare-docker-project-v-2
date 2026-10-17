@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, RotateCcw } from 'lucide-react';
+import { getBackend } from '../api';
+import { loadTrashBinEvents, restoreTrashBinEvent } from '../data/trashBin';
 import { UserRole } from '../types/pharmacy';
 import { invokeManageUsers } from './ManageUsersView';
 import { supabase } from '../utils/supabase';
@@ -18,6 +20,9 @@ const ENTITY_LABELS: Record<TrashBinEvent['entity_type'], string> = {
   medicine: 'Product',
   supplier: 'Supplier',
   purchase: 'Purchase',
+  category: 'Category',
+  brand: 'Manufacturer',
+  medicine_unit: 'Product unit',
 };
 
 const ACTION_LABELS: Record<TrashBinEvent['action'], string> = {
@@ -35,6 +40,20 @@ export function TrashBinView({ currentRole }: { currentRole: UserRole }) {
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
 
   const refresh = useCallback(async () => {
+    if (getBackend() === 'api') {
+      try {
+        setEvents(await loadTrashBinEvents());
+        setNotice(null);
+      } catch (caught) {
+        setNotice({
+          text: `Could not load Trash Bin activity: ${caught instanceof Error ? caught.message : 'Unknown error.'}`,
+          error: true,
+        });
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     if (!supabase) {
       setNotice({ text: 'Supabase is not configured.', error: true });
       setLoading(false);
@@ -67,26 +86,26 @@ export function TrashBinView({ currentRole }: { currentRole: UserRole }) {
   const visibleEvents = useMemo(() => filterTrashBinEvents(events, filter), [events, filter]);
 
   const restore = async (event: TrashBinEvent) => {
-    if (!event.can_restore || !supabase) return;
+    if (!event.can_restore || (getBackend() !== 'api' && !supabase)) return;
     setBusyId(event.id);
     setNotice(null);
     try {
-      if (event.entity_type === 'profile') {
+      if (getBackend() === 'api') {
+        await restoreTrashBinEvent(event);
+        setNotice({ text: `${event.display_name} restored.`, error: false });
+      } else if (event.entity_type === 'profile') {
         const result = await invokeManageUsers<{ message: string }>({
           action: 'restore',
           id: event.entity_id,
         });
         setNotice({ text: result.message || `${event.display_name} restored.`, error: false });
-      } else if (event.entity_type === 'medicine') {
-        const { error } = await supabase.rpc('restore_trash_medicine', {
-          p_medicine_id: event.entity_id,
-        });
-        if (error) throw new Error(error.message);
-        setNotice({ text: `${event.display_name} restored.`, error: false });
-      } else if (event.entity_type === 'supplier') {
-        const { error } = await supabase.rpc('restore_trash_supplier', {
-          p_supplier_id: event.entity_id,
-        });
+      } else if (event.entity_type === 'medicine' || event.entity_type === 'supplier') {
+        const client = supabase;
+        if (!client) throw new Error('Supabase is not configured.');
+        const result = event.entity_type === 'medicine'
+          ? await client.rpc('restore_trash_medicine', { p_medicine_id: event.entity_id })
+          : await client.rpc('restore_trash_supplier', { p_supplier_id: event.entity_id });
+        const { error } = result;
         if (error) throw new Error(error.message);
         setNotice({ text: `${event.display_name} restored.`, error: false });
       } else {

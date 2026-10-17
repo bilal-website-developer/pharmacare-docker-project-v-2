@@ -420,6 +420,9 @@ test('soft delete writes trash history and restore returns the record to its pri
     });
     assert.equal(trash.statusCode, 200);
     assert.equal(trash.json().items[0].displayName, 'Archived category');
+    assert.equal(trash.json().items[0].entityId, id);
+    assert.equal(trash.json().items[0].actorName, 'Unknown user');
+    assert.equal(trash.json().items[0].canRestore, true);
     const restored = await app.inject({
       method: 'POST',
       url: `/api/categories/${id}/restore`,
@@ -434,6 +437,30 @@ test('soft delete writes trash history and restore returns the record to its pri
     });
     assert.equal(history.json().total, 2);
     assert.deepEqual(history.json().items.map((item: { action: string }) => item.action), ['restored', 'deleted']);
+
+    const activeCategory = await app.inject({
+      method: 'POST',
+      url: '/api/categories',
+      headers: headers(admin),
+      payload: { name: 'Temporarily disabled category' },
+    });
+    const activeId = activeCategory.json().id as string;
+    const deactivated = await app.inject({
+      method: 'PATCH',
+      url: `/api/categories/${activeId}`,
+      headers: headers(admin),
+      payload: { isActive: false },
+    });
+    assert.equal(deactivated.statusCode, 200);
+    const deactivationHistory = await app.inject({
+      method: 'GET',
+      url: '/api/trash?entityType=category',
+      headers: headers(admin),
+    });
+    const deactivationEvent = deactivationHistory.json().items.find(
+      (item: { entityId: string; action: string }) => item.entityId === activeId && item.action === 'deactivated',
+    );
+    assert.equal(deactivationEvent?.canRestore, true);
   } finally {
     await app.close();
     await client.close();

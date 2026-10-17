@@ -397,7 +397,7 @@ test('Mongo transactions roll back purchase post and void after mid-transaction 
       purchaseId: purchase._id,
     });
     assert.ok(stockBeforeVoid);
-    repository.failAt = 'purchase_void.after_supplier_ledger';
+    repository.failAt = 'purchase_void.after_audit';
     await assert.rejects(
       repository.voidPurchase(
         shopId,
@@ -415,6 +415,32 @@ test('Mongo transactions roll back purchase post and void after mid-transaction 
     assert.equal(await database.collection('stockMovements').countDocuments({ shopId }), 1);
     assert.equal(await database.collection('supplierLedger').countDocuments({ shopId }), 1);
     assert.equal(await database.collection('auditLogs').countDocuments({ shopId }), 1);
+    assert.equal(await database.collection('trashEvents').countDocuments({
+      shopId,
+      entityId: purchase._id,
+      action: 'voided',
+    }), 0);
+    repository.failAt = '';
+    const voidedPurchase = await repository.voidPurchase(
+      shopId,
+      purchase._id,
+      actor,
+      'integration committed void test',
+      audit(actor, 'purchase.voided', 'purchase', purchase._id),
+    );
+    assert.equal(voidedPurchase.status, 'void');
+    const voidEvent = await database.collection('trashEvents').findOne({
+      shopId,
+      entityId: purchase._id,
+      action: 'voided',
+    });
+    assert.equal(voidEvent.displayName, purchase.purchaseNumber);
+    assert.equal(voidEvent.reason, 'integration committed void test');
+    assert.equal(await database.collection('trashEvents').countDocuments({
+      shopId,
+      entityId: purchase._id,
+      action: 'voided',
+    }), 1);
   });
 });
 

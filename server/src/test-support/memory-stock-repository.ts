@@ -33,6 +33,7 @@ interface MemoryState {
   movements: StockMovementRecord[];
   supplierLedger: Array<Record<string, unknown>>;
   audits: AuditRecord[];
+  trashEvents: Array<Record<string, unknown>>;
   supplierBalances: Map<string, bigint>;
   purchaseNumbers: Map<string, number>;
 }
@@ -44,6 +45,7 @@ function initialState(): MemoryState {
     movements: [],
     supplierLedger: [],
     audits: [],
+    trashEvents: [],
     supplierBalances: new Map(),
     purchaseNumbers: new Map(),
   };
@@ -77,6 +79,7 @@ export class MemoryStockRepository implements StockRepository {
       movements: [...previous.movements],
       supplierLedger: [...previous.supplierLedger],
       audits: [...previous.audits],
+      trashEvents: [...previous.trashEvents],
       supplierBalances: new Map(previous.supplierBalances),
       purchaseNumbers: new Map(previous.purchaseNumbers),
     };
@@ -365,6 +368,17 @@ export class MemoryStockRepository implements StockRepository {
       this.state.audits.push({
         ...audit, event: 'purchase.voided', entityType: 'purchase', entityId: purchaseId,
         before: { status: purchase.status }, after: { status: 'void', reason },
+      });
+      this.state.trashEvents.push({
+        shopId,
+        actorId: actor._id,
+        entityId: purchaseId,
+        entityType: 'purchase',
+        action: 'voided',
+        displayName: purchase.purchaseNumber,
+        role: actor.role,
+        occurredAt: now,
+        reason,
       });
       return after;
     });
@@ -705,5 +719,6 @@ export class MemoryStockRepository implements StockRepository {
   get movements(): StockMovementRecord[] { return [...this.state.movements]; }
   get ledger(): Array<Record<string, unknown>> { return [...this.state.supplierLedger]; }
   get auditEvents(): AuditRecord[] { return [...this.state.audits]; }
+  get trashBinEvents(): Array<Record<string, unknown>> { return [...this.state.trashEvents]; }
   get supplierBalanceValues(): ReadonlyMap<string, bigint> { return this.state.supplierBalances; }
 }

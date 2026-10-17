@@ -35,6 +35,8 @@ test('filters Trash Bin events by entity type', () => {
   assert.deepEqual(filterTrashBinEvents(events, 'all'), events);
   assert.deepEqual(filterTrashBinEvents(events, 'medicine'), [events[0]]);
   assert.deepEqual(filterTrashBinEvents(events, 'purchase'), [events[1]]);
+  const catalogEvent = { ...events[0], id: '3', entity_type: 'category' as const };
+  assert.deepEqual(filterTrashBinEvents([...events, catalogEvent], 'medicine'), [events[0], catalogEvent]);
 });
 
 test('parses events and applies safe display fallbacks', () => {

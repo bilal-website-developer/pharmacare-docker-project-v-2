@@ -482,6 +482,13 @@ test('void purchase reverses supplier balance and stock only before any stock mo
     assert.equal(stock.movements[1]!.movementType, 'PURCHASE_RETURN');
     assert.equal(stock.supplierBalanceValues.get(supplierId.toHexString()), 0n);
     assert.equal(stock.ledger.length, 2);
+    assert.equal(stock.trashBinEvents[0]?.action, 'voided');
+    assert.equal(stock.trashBinEvents[0]?.displayName, posted.json().purchaseNumber);
+    assert.equal(stock.trashBinEvents[0]?.reason, 'Incorrect order');
+    assert.equal(stock.trashBinEvents.length, 1);
+    assert.equal(stock.trashBinEvents[0]?.action, 'voided');
+    assert.equal(stock.trashBinEvents[0]?.displayName, posted.json().purchaseNumber);
+    assert.equal(stock.trashBinEvents[0]?.reason, 'Incorrect order');
   } finally {
     await app.close();
     await client.close();

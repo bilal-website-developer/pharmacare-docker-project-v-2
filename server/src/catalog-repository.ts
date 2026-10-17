@@ -27,14 +27,17 @@ export interface CatalogListOptions {
 }
 
 export interface TrashRecord {
+  _id?: ObjectId;
   shopId: ObjectId;
   actorId: ObjectId;
   entityId: ObjectId;
-  entityType: CatalogEntityType;
-  action: 'deleted' | 'restored';
+  entityType: CatalogEntityType | 'profile' | 'purchase';
+  action: 'deleted' | 'deactivated' | 'voided' | 'restored';
   displayName: string;
   role: Role;
   occurredAt: Date;
+  reason?: string | null;
+  actorName?: string;
 }
 
 export interface MasterDataValue {
@@ -87,6 +90,7 @@ export interface CatalogRepository {
     updates: Record<string, unknown>,
     actorId: ObjectId,
     audit: (before: CatalogRecord, after: CatalogRecord) => AuditRecord[],
+    role: Role,
   ): Promise<CatalogRecord | null>;
   saveUnit(
     unit: CatalogRecord,
@@ -456,6 +460,7 @@ export class MongoCatalogRepository implements CatalogRepository {
     updates: Record<string, unknown>,
     actorId: ObjectId,
     audit: (before: CatalogRecord, after: CatalogRecord) => AuditRecord[],
+    role: Role,
   ): Promise<CatalogRecord | null> {
     const session = this.client.startSession();
     let updated: CatalogRecord | null = null;
@@ -487,6 +492,26 @@ export class MongoCatalogRepository implements CatalogRepository {
         const stored = await records.findOne({ _id: id, shopId }, { session });
         if (!stored) throw new Error('Catalog record disappeared inside transaction');
         const events = audit(before, stored);
+        if (before.isActive === true && stored.isActive === false) {
+          const entityType = {
+            categories: 'category',
+            brands: 'brand',
+            medicines: 'medicine',
+            medicineUnits: 'medicine_unit',
+            suppliers: 'supplier',
+          }[collection];
+          await this.database.collection('trashEvents').insertOne({
+            shopId,
+            actorId,
+            entityId: id,
+            entityType,
+            action: 'deactivated',
+            displayName: String(before.name ?? before.code ?? ''),
+            role,
+            occurredAt: stored.updatedAt,
+            reason: null,
+          }, { session });
+        }
         if ((collection === 'categories' || collection === 'brands') && before.name !== stored.name) {
           await this.records('medicines').updateMany(
             {
@@ -696,10 +721,32 @@ export class MongoCatalogRepository implements CatalogRepository {
     const filter = { shopId, ...(entityType ? { entityType } : {}) };
     const collection = this.database.collection<TrashRecord>('trashEvents');
     const [rows, total] = await Promise.all([
-      collection.find(filter).sort({ occurredAt: -1, _id: -1 }).skip((page - 1) * pageSize).limit(pageSize).toArray(),
+      collection.find(filter)
+        .sort({ occurredAt: -1, _id: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize)
+        .toArray(),
       collection.countDocuments(filter),
     ]);
-    return { rows, total };
+    const actorIds = [...new Map(rows.map((row) => [row.actorId.toHexString(), row.actorId])).values()];
+    const actors = actorIds.length
+      ? await this.database.collection<{
+        _id: ObjectId;
+        fullName?: string;
+        username?: string;
+        email?: string;
+      }>('users').find({ shopId, _id: { $in: actorIds } }, {
+        projection: { _id: 1, fullName: 1, username: 1, email: 1 },
+      }).toArray()
+      : [];
+    const actorNames = new Map(actors.map((actor) => [
+      actor._id.toHexString(),
+      actor.fullName?.trim() || actor.username?.trim() || actor.email?.trim() || 'Unknown user',
+    ]));
+    return {
+      rows: rows.map((row) => ({ ...row, actorName: actorNames.get(row.actorId.toHexString()) ?? 'Unknown user' })),
+      total,
+    };
   }
 
   async latestCosts(shopId: ObjectId, medicineIds: ObjectId[], today: Date): Promise<Map<string, string>> {

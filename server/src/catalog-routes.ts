@@ -316,7 +316,7 @@ function registerNamedRoutes(
     try {
       const updated = await repository.update(collection, caller.shopId, id, updates, caller._id, (before, after) => [
         auditRecord(caller, `${entityType}.updated`, entityType, id, snapshot(before), snapshot(after)),
-      ]);
+      ], caller.role);
       if (!updated) return reply.code(404).send({ error: 'NOT_FOUND' });
       return reply.send(toDto(updated, collection));
     } catch (error) {
@@ -550,7 +550,7 @@ export function registerCatalogRoutes(
     try {
       const updated = await repository.update('suppliers', caller.shopId, id, updates, caller._id, (before, after) => [
         auditRecord(caller, 'supplier.updated', 'supplier', id, snapshot(before), snapshot(after)),
-      ]);
+      ], caller.role);
       if (!updated) return reply.code(404).send({ error: 'NOT_FOUND' });
       return reply.send(toDto(updated, 'suppliers'));
     } catch (error) {
@@ -710,7 +710,7 @@ export function registerCatalogRoutes(
       const updated = await repository.update('medicines', caller.shopId, id, updates, caller._id, (before, after) => [
         auditRecord(caller, 'medicine.updated', 'medicine', id, snapshot(before), snapshot(after)),
         ...(before.code !== after.code ? [auditRecord(caller, 'medicine.code_changed', 'medicine', id, { code: before.code }, { code: after.code })] : []),
-      ]);
+      ], caller.role);
       if (!updated) return reply.code(404).send({ error: 'NOT_FOUND' });
       return reply.send(toDto(updated, 'medicines'));
     } catch (error) {
@@ -1093,13 +1093,20 @@ export function registerCatalogRoutes(
     );
     return reply.send({
       items: result.rows.map((row) => ({
-        id: row.entityId.toHexString(),
+        id: row._id?.toHexString() ?? `${row.entityId.toHexString()}:${row.action}:${row.occurredAt.getTime()}`,
+        entityId: row.entityId.toHexString(),
         entityType: row.entityType,
         action: row.action,
         displayName: row.displayName,
         actorId: row.actorId.toHexString(),
+        actorName: row.actorName ?? 'Unknown user',
         role: row.role,
         occurredAt: row.occurredAt.toISOString(),
+        reason: row.reason ?? null,
+        canRestore: (row.action === 'deleted'
+          && ['profile', 'category', 'brand', 'medicine', 'supplier'].includes(row.entityType))
+          || (row.action === 'deactivated'
+            && ['category', 'brand', 'medicine', 'supplier'].includes(row.entityType)),
       })),
       page: parsed.data.page,
       pageSize: parsed.data.pageSize,

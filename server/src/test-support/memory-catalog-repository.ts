@@ -217,6 +217,7 @@ export class MemoryCatalogRepository implements CatalogRepository {
     updates: Record<string, unknown>,
     _actorId: ObjectId,
     audit: (before: CatalogRecord, after: CatalogRecord) => AuditRecord[],
+    role: Role,
   ): Promise<CatalogRecord | null> {
     const before = await this.get(collection, shopId, id);
     if (!before) return null;
@@ -229,6 +230,26 @@ export class MemoryCatalogRepository implements CatalogRepository {
     this.map(collection).set(id.toHexString(), after);
     const events = audit(before, after);
     this.audits.push(...events);
+    if (before.isActive === true && after.isActive === false) {
+      const entityType = {
+        categories: 'category',
+        brands: 'brand',
+        medicines: 'medicine',
+        medicineUnits: 'medicine_unit',
+        suppliers: 'supplier',
+      }[collection] as CatalogEntityType;
+      this.trash.push({
+        shopId,
+        actorId: _actorId,
+        entityId: id,
+        entityType,
+        action: 'deactivated',
+        displayName: String(before.name ?? before.code ?? ''),
+        role,
+        occurredAt: after.updatedAt,
+        reason: null,
+      });
+    }
     if ((collection === 'categories' || collection === 'brands') && before.name !== after.name) {
       const foreignKey = collection === 'categories' ? 'categoryId' : 'brandId';
       const nameKey = collection === 'categories' ? 'categoryName' : 'brandName';
@@ -327,7 +348,10 @@ export class MemoryCatalogRepository implements CatalogRepository {
   async listTrash(shopId: ObjectId, entityType: CatalogEntityType | undefined, page: number, pageSize: number): Promise<{ rows: TrashRecord[]; total: number }> {
     const rows = this.trash.filter((record) =>
       record.shopId.equals(shopId) && (!entityType || record.entityType === entityType),
-    ).sort((left, right) => right.occurredAt.getTime() - left.occurredAt.getTime());
+    ).sort((left, right) =>
+      right.occurredAt.getTime() - left.occurredAt.getTime()
+      || right.entityId.toHexString().localeCompare(left.entityId.toHexString()),
+    );
     return { rows: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length };
   }
 

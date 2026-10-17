@@ -1,4 +1,4 @@
-export type TrashEntityType = 'profile' | 'medicine' | 'supplier' | 'purchase';
+export type TrashEntityType = 'profile' | 'medicine' | 'supplier' | 'purchase' | 'category' | 'brand' | 'medicine_unit';
 export type TrashAction = 'deleted' | 'deactivated' | 'voided' | 'restored';
 export type TrashFilter = 'all' | TrashEntityType;
 
@@ -25,7 +25,7 @@ export function parseTrashBinEvent(value: unknown): TrashBinEvent {
     || typeof value.id !== 'string'
     || (value.actor_id !== null && typeof value.actor_id !== 'string')
     || typeof value.actor_name !== 'string'
-    || !['profile', 'medicine', 'supplier', 'purchase'].includes(String(value.entity_type))
+    || !['profile', 'medicine', 'supplier', 'purchase', 'category', 'brand', 'medicine_unit'].includes(String(value.entity_type))
     || typeof value.entity_id !== 'string'
     || (value.entity_role !== null && typeof value.entity_role !== 'string')
     || !['deleted', 'deactivated', 'voided', 'restored'].includes(String(value.action))
@@ -57,5 +57,7 @@ export function filterTrashBinEvents(
 ): TrashBinEvent[] {
   return filter === 'all'
     ? [...events]
-    : events.filter((event) => event.entity_type === filter);
+    : events.filter((event) => filter === 'medicine'
+      ? ['medicine', 'category', 'brand', 'medicine_unit'].includes(event.entity_type)
+      : event.entity_type === filter);
 }
