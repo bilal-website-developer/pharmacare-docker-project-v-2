@@ -1,7 +1,6 @@
 # Control Plane Design
 
-Status: Phase A design only. No application code has been written.
-Owner approval is required before implementation.
+Status: Design basis for an implementation in progress. Steps 1-8 are implemented locally; step 9 (host updater) and steps 10-14 are not complete. Step 8's bundle build and image scan passed locally, but detached signing was not run because OpenSSL is unavailable. See `docs/CONTROL_PLANE_STATE.md` for current evidence and gaps. No real Supabase project has been configured.
 
 ## 1. Scope and design intent
 
@@ -29,7 +28,7 @@ These are owner-approved and form the baseline for all implementation work:
 - When the owner adds a shop admin, they choose the plan type (monthly, yearly, one_time), expiry, offline_grace_days (default 14, allowed 1-60), warning_days (default 7, allowed 0-30), and renewal_notice_days (default 7, allowed 0-30).
 - All licence values are server-validated and signed with Ed25519.
 - Licence expiry transitions are: renewal notice, warning period, inactive mode, then manually reactivated by a new signed licence.
-- Inactive mode blocks only new sales, purchases and stock changes and never cuts off a sale in progress.
+- Inactive mode blocks new sales, purchases and stock changes; a one-time API-issued sale-draft token opened before inactivity allows completion within 60 minutes.
 - A one-time plan never expires and is immune to offline-time blocking.
 - The developer never uses a shop's real password and support uses a 6-digit code valid 30 minutes with scopes diagnostics, read_only and admin_actions.
 - Support access never uses the shop admin's real password. It uses a one-time support code and signed support token with scoped access.
@@ -47,7 +46,7 @@ Developer browser
   v
 Control Plane (Supabase project)
   - Postgres: shops, licences, devices, admins, releases, audit
-  - Edge Functions: activate, heartbeat, get-licence, get-release, support-token
+  - Edge Functions: activate, heartbeat, get-licence, get-release, support-allow, support-token, support-end, create-shop, extend-licence, suspend, change-plan, approve-release, withdraw-release
   - Storage: signed bundle storage
   |
   | HTTPS outbound only
@@ -490,16 +489,13 @@ Response:
 }
 ```
 
-### 6.5 `support-token`
+### 6.5 `support-allow`
 
 Request:
 
 ```json
 {
-  "shop_id": "uuid",
-  "device_id": "uuid",
-  "device_key": "string",
-  "support_code": "123456",
+  "code": "six-digit one-time code",
   "scope": "diagnostics|read_only|admin_actions"
 }
 ```
@@ -508,16 +504,25 @@ Response:
 
 ```json
 {
-  "support_token": "signed-token",
-  "expires_at": "2026-10-18T11:00:00Z",
-  "scope": "diagnostics"
+  "session_id": "uuid",
+  "expires_at": "timestamp"
 }
 ```
+
+The shop authenticates this request with its device key hash. The raw code is returned only by the shop's authenticated `POST /api/support/allow`; only its hash is persisted.
+
+### 6.6 `support-token`
+
+An authenticated developer with Supabase AAL2 submits `shop_id`, `code`, and `scope`. The function verifies the one-time code hash and approved scope, stores the signed token hash, and returns `{ "token": "signed-token" }`. The token is Ed25519-signed and contains the session ID, shop ID, scope, issue time and expiry.
+
+### 6.7 `support-end`
+
+The shop device submits the support session UUID. The function ends only an unended session belonging to that device's shop and appends an audit row.
 
 Errors:
 
 - support code invalid or expired
-- device not registered
+- device not registered or not associated with the session's shop
 - scope not approved by shop admin
 - too many token requests
 
@@ -609,37 +614,28 @@ Business behaviour by status:
 
 ### 9.1 Support flow
 
-1. Shop admin presses “Allow support” in the app.
-2. App generates a 6-digit code valid for 30 minutes and records a local audit event.
-3. Owner enters the code in the control plane.
-4. Control plane issues a signed support token with short expiry and chosen scope.
-5. Token is used only for the specified support operation.
-6. Session ends automatically or by explicit admin stop.
+1. A shop admin calls the device-authenticated `support-allow` operation with an approved scope. The shop server generates a six-digit code valid for 30 minutes.
+2. The raw code is returned once; Mongo and the control plane persist only its SHA-256 hash. The code-bearing response is excluded from the shop API idempotency cache.
+3. An authenticated developer with Supabase AAL2 redeems the code once using `support-token`.
+4. The control plane signs a scope-, shop- and expiry-bound token with Ed25519; the control plane stores only the token hash.
+5. The shop server verifies the signature using `SUPPORT_TOKEN_PUBLIC_KEY`, then checks the local support-session record, shop binding, expiry and granted scope on every request. It binds the first accepted token by hash.
+6. The shop admin can end the session locally; the shop also asks the control plane to end it. Local enforcement rejects requests after ending even if the remote end call fails.
 
-### 8.2 Allowed scopes
+### 9.2 Allowed scopes
 
-- `diagnostics`: masked logs and health data only
-- `read_only`: read-only view of shop screens
-- `admin_actions`: password reset, backup trigger, restart service
+- `diagnostics`: the masked diagnostics report only
+- `read_only`: diagnostics plus the current allowlisted read-only report (currently the same aggregate report)
+- `admin_actions`: diagnostics, read-only report and the currently implemented licence-refresh action
 
-### 8.3 Audit requirements
+Reading shop screens, password resets, backup triggers and service restarts are not implemented. The direct relay/screen-support path is also not implemented.
 
-Every support action logs:
+### 9.3 Audit requirements
 
-- who approved
-- who started the session
-- exact scope granted
-- time started and ended
-- action performed during the session
+The local audit log records approval, first use, diagnostics/read-only access, licence refresh and end-session events. The control-plane audit log records approval, developer start and end events. Records contain session IDs/scopes but never the code or token.
 
-### 8.4 v1 support implementation note
+### 9.4 Implementation boundary
 
-Because shops are behind routers, v1 support is implemented as:
-
-- a masked diagnostics report uploaded by the shop to the control plane, and
-- a remote screen tool started by the shop admin themselves.
-
-A built-in direct relay for `read_only` sessions is deferred to Phase H.
+The API endpoints are implemented and tested locally, but external support access still requires a reachable shop API. A deployed Supabase project, internet/NAT relay, support UI, and real-shop acceptance remain future work.
 
 ---
 
@@ -753,8 +749,9 @@ Reason: activation, heartbeat, signed licence verification, support token valida
 - `src/App.tsx`
 - `src/components/*`
 - `src/permissions.tsx`
+- `control-plane/panel/`
 
-Reason: Add shop list, admin form, add-shop flow, approval history, release management, suspension and support views.
+Reason: The shop UI provides activation setup, role-filtered licence-state banners and an admin-only Allow Support/end-session page. The standalone developer panel gates on Supabase AAL2, reads through developer-authorized Edge Functions, administers shops/licences and displays the audit log and release approval workflow. Real Supabase Auth/RLS and browser acceptance remain unverified; release bundle signing/publication is separate follow-up work.
 
 ### 12.5 Docs and operational proof
 
@@ -771,16 +768,12 @@ Reason: keep the implementation aligned with the approved design and acceptance 
 
 ## 13. Migration plan for removing `super_admin`
 
-The existing shop install path still contains a first-run Super Admin creation pattern. This must be removed without breaking the local tests or the installed app.
+This migration is implemented on `feature/control-plane`; the old literal remains only to select legacy records and record the audit event.
 
-Required steps:
-
-1. Remove first-run developer bootstrap from the shop installer.
-2. Replace `super_admin` role with `admin` as the highest local role.
-3. Create a single local admin account from the activation flow only after the shop admin email is validated.
-4. Keep any legacy role mapping in a compatibility layer for one version only.
-5. Ensure all permissions and routes enforce the new role set.
-6. Add migration tests proving the old `super_admin` path is not created during first run.
+1. First-run setup creates the local shop admin only after both the one-time setup code and a control-plane activation code are accepted.
+2. Startup transactionally converts legacy `super_admin` records to `admin` and records one audit event per converted account.
+3. Shop role lists and permissions expose `admin` as the highest local role; the obsolete super-admin seed command was removed.
+4. Policy and real-Mongo integration tests cover the local role transition. Test counts and gaps are in `docs/CONTROL_PLANE_STATE.md`.
 
 ---
 

@@ -1,6 +1,6 @@
 # Control Plane Decisions
 
-Status: Phase A design record. No code is implemented from this document.
+Status: Active decision record. Implementation progress and test evidence are tracked in `docs/CONTROL_PLANE_STATE.md`.
 
 ## 1. Decision log
 
@@ -11,6 +11,7 @@ Status: Phase A design record. No code is implemented from this document.
 | D3 | Developer may inspect a shop only when needed, through a scoped support flow | Approved | Includes masked diagnostics and audit log |
 | D4 | Plan type and expiry are chosen by owner per shop | Approved | `monthly`, `yearly`, `one_time` |
 | D5 | Offline days and warning days are chosen by owner per shop | Approved | Validated server-side with limits |
+| D6 | A sale draft opened before inactivity may finish once within 60 minutes | Approved | The shop API issues an HMAC-authenticated draft token while sales are permitted; inactive-mode middleware enforces expiry/shop binding and the sale transaction consumes the token once. |
 
 ---
 
@@ -20,7 +21,7 @@ Status: Phase A design record. No code is implemented from this document.
 | --- | --- | --- |
 | 1. Threat model | `docs/CONTROL_PLANE_DESIGN.md` section 4 | Includes control plane, shop device, support session and update channel |
 | 2. Full data model and RLS tests | `docs/CONTROL_PLANE_DESIGN.md` section 5 | Includes table list, RLS, and required tests |
-| 3. Edge Function API contract | `docs/CONTROL_PLANE_DESIGN.md` section 7 | Covers activate, heartbeat, get-licence, get-release, support-token |
+| 3. Edge Function API contract | `docs/CONTROL_PLANE_DESIGN.md` sections 6-7 | Covers activation/heartbeat/licence/release and support allow/token/end operations |
 | 4. Exact formats | `docs/CONTROL_PLANE_DESIGN.md` section 6 | Covers licence, support code, support token, release manifest, reset code |
 | 5. Licence state machine and tests | `docs/CONTROL_PLANE_DESIGN.md` section 8 | Includes states and edge-case test matrix |
 | 6. File impact list | `docs/CONTROL_PLANE_DESIGN.md` section 12 | Lists all repo files and reasons |
@@ -32,8 +33,9 @@ Status: Phase A design record. No code is implemented from this document.
 Fixed rule checks:
 
 - The owner chooses plan type (monthly, yearly, one_time), expiry, offline_grace_days (default 14, allowed 1-60), warning_days (default 7, allowed 0-30) and renewal_notice_days (default 7, allowed 0-30) when adding a shop admin.
-- Inactive mode blocks only new sales, purchases and stock changes and never cuts off a sale in progress.
+- Inactive mode blocks new sales, purchases and stock changes. A sale draft opened before the inactive boundary may complete once within 60 minutes, enforced by a server-issued HMAC token consumed in the sale transaction.
 - The developer never uses a shop's real password and support uses a 6-digit code valid 30 minutes with scopes diagnostics, read_only and admin_actions.
+- Support codes and signed tokens are persisted only as hashes. Each shop permits one active support session; the first locally verified token is bound by hash. Local session end blocks access immediately, even if the control-plane end request cannot complete. Current `admin_actions` is limited to licence refresh; wider shop administration and direct screen relay are not implemented.
 
 ---
 
