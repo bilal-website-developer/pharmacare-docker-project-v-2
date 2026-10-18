@@ -77,3 +77,15 @@ Decisions recorded while finishing the migration. Revisit a decision only when n
 - **Decision:** Apply `nosniff`, frame denial, strict referrer/permissions policy, same-origin resource policy, and a JSON-only API CSP. Nginx hides overlapping API headers before applying its own copy, avoiding duplicate response fields. Do not add a global frontend CSP until legacy external origins have been inventoried.
 - **Alternatives:** Duplicate upstream/proxy headers; apply the API's restrictive CSP to the React frontend; omit headers on static responses.
 - **Reason:** Keep a consistent single header value through the local proxy while avoiding a CSP that would break the retained Supabase path.
+
+### Mongo backup identity and archive handling
+
+- **Decision:** Create a separate `MONGO_BACKUP_USERNAME` in the application database with only the built-in `read` role on that database. Keep the password in the ignored `.env`; write the temporary Mongo tools config only to container tmpfs; store compressed archives in a separate named volume with configurable age retention.
+- **Alternatives:** Give the backup container the Mongo root credential; reuse the API credential; give the backup user cluster-wide `backup` privileges; store plaintext credentials in an image or archive volume.
+- **Reason:** Limit backup access to the one application database and avoid putting credentials in an image, persistent archive, command line, or logs. Existing installs must add the new credential and rerun `mongo-init`.
+
+### Restore rehearsal target and comparison
+
+- **Decision:** Restore archives only to the opt-in `mongo-restore-scratch` service, whose database uses tmpfs, with no published port or persistent volume. Compare per-collection counts while excluding only volatile `authRateLimits` and `requestRateLimits`, which can change due to rehearsal requests.
+- **Alternatives:** Restore over the source database; add `--drop`; use a persistent scratch volume; compare only one overall document total.
+- **Reason:** Avoid destructive operations and persistent test data while detecting collection-level omissions. This rehearsal does not establish disaster-recovery RTO/RPO or off-host backup durability.

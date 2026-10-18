@@ -41,6 +41,8 @@ services:
       MONGO_APP_DB: ${MONGO_APP_DB:?MONGO_APP_DB is required}
       MONGO_APP_USERNAME: ${MONGO_APP_USERNAME:?MONGO_APP_USERNAME is required}
       MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD is required}
+      MONGO_BACKUP_USERNAME: ${MONGO_BACKUP_USERNAME:?MONGO_BACKUP_USERNAME is required}
+      MONGO_BACKUP_PASSWORD: ${MONGO_BACKUP_PASSWORD:?MONGO_BACKUP_PASSWORD is required}
       MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?MONGO_ROOT_USERNAME is required}
       MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD is required}
     depends_on:
@@ -48,6 +50,59 @@ services:
         condition: service_healthy
     networks:
       - database
+    security_opt:
+      - no-new-privileges:true
+
+  mongo-backup:
+    image: mongo:8.0.12
+    profiles: ["backup"]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/opt/pharmacare/mongo-backup.sh"]
+    environment:
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_APP_DB: ${MONGO_APP_DB:?MONGO_APP_DB is required}
+      MONGO_BACKUP_USERNAME: ${MONGO_BACKUP_USERNAME:?MONGO_BACKUP_USERNAME is required}
+      MONGO_BACKUP_PASSWORD: ${MONGO_BACKUP_PASSWORD:?MONGO_BACKUP_PASSWORD is required}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - mongo_backups:/backups
+      - ./docker/mongo-backup.sh:/opt/pharmacare/mongo-backup.sh:ro
+    tmpfs:
+      - /run/mongo-backup:rw,noexec,nosuid,size=1m
+      - /tmp:rw,noexec,nosuid,size=32m
+    networks:
+      - database
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /backups/last-success && [ $$(($(date +%s) - $$(stat -c %Y /backups/last-success))) -lt $$((BACKUP_INTERVAL_SECONDS * 2)) ]"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 10m
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+
+  mongo-restore-scratch:
+    image: mongo:8.0.12
+    profiles: ["backup-restore"]
+    command: ["mongod", "--bind_ip_all"]
+    tmpfs:
+      - /data/db
+      - /tmp
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--host", "127.0.0.1", "--eval", "db.adminCommand({ ping: 1 }).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     security_opt:
       - no-new-privileges:true
 
@@ -161,3 +216,4 @@ networks:
 
 volumes:
   mongo_data:
+  mongo_backups:

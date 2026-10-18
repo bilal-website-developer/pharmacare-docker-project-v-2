@@ -10,6 +10,8 @@ const initSchema = z.object({
   MONGO_APP_DB: z.string().regex(/^[A-Za-z0-9_-]{1,63}$/),
   MONGO_APP_USERNAME: z.string().min(3).max(64),
   MONGO_APP_PASSWORD: strongSecret(32),
+  MONGO_BACKUP_USERNAME: z.string().regex(/^[A-Za-z0-9_-]{3,64}$/),
+  MONGO_BACKUP_PASSWORD: strongSecret(32),
   MONGO_ROOT_USERNAME: z.string().min(3).max(64),
   MONGO_ROOT_PASSWORD: strongSecret(32),
 });
@@ -66,6 +68,8 @@ function redactSensitiveValues(value: string): string {
     'MONGO_APP_DB',
     'MONGO_APP_USERNAME',
     'MONGO_APP_PASSWORD',
+    'MONGO_BACKUP_USERNAME',
+    'MONGO_BACKUP_PASSWORD',
     'MONGO_ROOT_USERNAME',
     'MONGO_ROOT_PASSWORD',
   ];
@@ -157,6 +161,35 @@ async function ensureAppUser(
       createUser: username,
       pwd: password,
       roles: [{ role: 'readWrite', db: databaseName }],
+    }),
+  );
+}
+
+async function ensureBackupUser(
+  adminClient: MongoClient,
+  databaseName: string,
+  username: string,
+  password: string,
+): Promise<void> {
+  const database = adminClient.db(databaseName);
+  const existing = await runStep('checking Mongo backup user', () =>
+    database.command({ usersInfo: username }),
+  );
+  if (Array.isArray(existing.users) && existing.users.length > 0) {
+    await runStep('updating Mongo backup user', () =>
+      database.command({
+        updateUser: username,
+        pwd: password,
+        roles: [{ role: 'read', db: databaseName }],
+      }),
+    );
+    return;
+  }
+  await runStep('creating Mongo backup user', () =>
+    database.command({
+      createUser: username,
+      pwd: password,
+      roles: [{ role: 'read', db: databaseName }],
     }),
   );
 }
@@ -357,7 +390,13 @@ async function main(): Promise<void> {
       config.MONGO_APP_USERNAME,
       config.MONGO_APP_PASSWORD,
     );
-    log('replica_set_and_app_user_ready');
+    await ensureBackupUser(
+      adminClient,
+      config.MONGO_APP_DB,
+      config.MONGO_BACKUP_USERNAME,
+      config.MONGO_BACKUP_PASSWORD,
+    );
+    log('replica_set_app_and_backup_users_ready');
   } finally {
     await runStep('closing root administrator connection', () => adminClient.close());
   }

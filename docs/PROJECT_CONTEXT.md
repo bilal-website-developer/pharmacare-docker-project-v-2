@@ -6,7 +6,7 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging coexist with the legacy Supabase implementation. Phases 0–7 are implemented in source; Phase 8 has API-mode wiring for auth/session and the listed business screens, including Products, Stock Inventory, Trash Bin, labels, receipts, and first-run setup. The setup transaction has a real-Mongo test, but installer code provisioning and browser/shop-PC acceptance remain open. Phases 9–11 require production/manual acceptance or additional deliverables; Phase 12 is preparation only.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging coexist with the legacy Supabase implementation. Phases 0–9 are implemented with local test evidence; Phase 8 browser acceptance remains open. Phase 10 has a locally rehearsed Mongo archive/restore path and an undeployed Caddy production overlay; production acceptance remains open. Phase 11 demo/manual-acceptance deliverables and Phase 12 cut-over preparation remain open.
 
 - Latest modules: Products, Stock Inventory, and Trash Bin use typed API adapters; the Vite proxy targets Compose API `:3000` by default with a `VITE_API_PROXY_TARGET` override for host Fastify `:3001`. Supabase fallback remains available.
 
@@ -40,7 +40,7 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - `src/utils/`, `src/types/`, `src/data/`: reusable logic, TypeScript domain shapes, API data adapters, and mock pharmacy data.
 - `supabase/migrations/`, `supabase/functions/`, `supabase/baseline/`: database migrations, Edge Functions, and a supplied schema snapshot.
 - `server/`: Fastify/TypeScript API, MongoDB replica-set initializer, auth/user/catalog/purchase/stock/sales/customer/Phase 7/setup routes, transaction repositories, first-run Super Admin CLI, fictional starter catalog import CLI/data, and a Compose-only real-Mongo test runner.
-- `docker/`, `docker-compose.yml`, `Dockerfile`: local Mongo/API/web container setup, loopback-only single-PC installer, and Nginx configuration. See `docs/DOCKER.md` and `docs/INSTALLER.md`.
+- `docker/`, `docker-compose.yml`, `docker-compose.prod.yml`, `Dockerfile`: local Mongo/API/web container setup, scheduled backup and scratch restore services, loopback-only installer, and Caddy/Nginx configuration. See `docs/DOCKER.md`, `docs/INSTALLER.md`, and `docs/DEPLOYMENT.md`.
 - `docs/`: database references, `MASTER_PLAN.md`, `MULTI_SHOP_FULL_PLAN.md`, execution progress, redesign notes, and this context.
 - `scripts/`, `.githooks/`: context generation and commit-hook tooling.
 - `public/`: static assets and fonts.
@@ -52,6 +52,7 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - Browser `localStorage`: UI-only preferences, saved inventory views, purchase drafts, per-user stock-alert keys seen, and other device settings. API-mode shop identity, memo settings, and receipt settings are server-backed.
 - Mixed persistence: `VITE_BACKEND=supabase` retains the legacy Supabase behavior. API-mode adapters cover auth/session, Stock Alerts, Products/Stock Inventory, Suppliers, POS catalog/sales, Settings, Customer Ledger/Sales History, Master Data, Cash Book/expenses, Print Requests, Manage Users, Returns, Purchases/History, Dashboard/Business Analytics, and Trash Bin. Barcode labels and sale/payment/return receipts use safe API-fed DTOs and local HTML renderers. Manual UI and production acceptance remain unverified.
 - Other storage: unknown; no general file/object-storage workflow is established by the checked-in frontend docs.
+- Mongo backup archives use a separate Compose volume; the backup identity is limited to database `read`. Production Caddy certificate data is persisted in a named volume. No off-host archive copy or production restore is proven.
 - Shared production data behavior depends on Supabase deployment and the live schema, which may differ from checked-in migrations.
 - The local Docker stack contains authenticated MongoDB on a private network and a Fastify API with health, auth, Manage Users, catalog, purchase, stock, sales, Phase 7, and first-run setup routes. Local Compose startup, Mongo initialization/index creation, service health checks, `/api/health` proxy, and targeted real-Mongo integration tests have passed in prior/current sessions. The setup wizard still depends on installer-provisioned `SETUP_CODE_HASH` and `SETUP_CODE_EXPIRES_AT`; this is not production or manual UI acceptance. Legacy Supabase paths remain available.
 
@@ -98,14 +99,14 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - **Current checkout:** `feature/mongo-migration`. Phase 8 API coverage and Phase 9 local verification evidence are tracked in `docs/MONGO_MIGRATION.md`; manual UI and production security acceptance remain outstanding.
 - The Supabase implementation remains intact as the alternate backend. Owner-reported migration/ACL state and source-only barcode/Trash Bin changes are historical context, not live verification; do not run Supabase operations as part of the Mongo migration.
 - Existing UI behavior includes POS split tender, customer credit, cashier print requests, audited receipt-only print edits, role-based cost visibility, barcode/label workflows, stock alerts, and Trash Bin; API-mode adapters are implemented while manual acceptance remains pending.
-- Security and runtime gates still open: production CORS/TLS and Mongo rate-limit load behavior, backup/restore proof, production deployment, demo data, and manual API-mode acceptance. Local security checks are recorded in `docs/MONGO_SECURITY_REPORT.md`; no penetration test was performed. Keep Supabase code and migrations untouched.
+- Security and runtime gates still open: public production CORS/TLS and Mongo rate-limit load behavior, off-host backup, production deployment, demo data, and manual API-mode acceptance. A local scratch restore rehearsal passed, but no production restore was done. Local security checks are recorded in `docs/MONGO_SECURITY_REPORT.md`; no penetration test was performed. Keep Supabase code and migrations untouched.
 
 ## Known issues and Later
 
 - Multi-shop decisions are captured in `docs/MULTI_SHOP_FULL_PLAN.md` and `docs/MASTER_PLAN.md`; they are design references, not authority for unimplemented access paths or database changes.
 - Legacy Supabase schema, migrations, RPCs, and ACLs may differ from checked-in source. No live verification was performed in this work; leave `supabase/` and its migrations untouched until approved cut-over.
 - The Supabase baseline SQL is reconstructed, not a complete dump; timestamped rollback scripts are not forward migrations. Legacy barcode uniqueness, Supabase print/Trash Bin deployments, and physical scanner/printer behavior remain unverified; QR labels and direct ESC/POS support are not implemented.
-- Existing Supabase mode and demo features may still use legacy or in-memory data. In API mode, listed modules use the Mongo API; backup/restore proof, production deployment, and manual UI acceptance remain open.
+- Existing Supabase mode and demo features may still use legacy or in-memory data. In API mode, listed modules use the Mongo API; off-host backup, production deployment, and manual UI acceptance remain open.
 
 ## Assumptions
 
@@ -119,6 +120,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - 2026-10-17 — Added first-run setup status and wizard plus a one-transaction shop/Super Admin/settings/audit bootstrap guarded by expiring, hash-checked setup code. Setup batch root tests: 269 total (257 passed, 0 failed, 12 skipped); security tests 9/9; Compose Mongo integration 12/12; lint/build passed. Installer code generation/display and browser acceptance remain open.
 - 2026-10-17 — Added a 20-entry fictional starter catalog and Super Admin-only transactional/idempotent importer; new entries are inactive, zero-priced, and have no stock. Current root tests: 272 total (259 passed, 0 failed, 13 skipped); focused catalog tests 2/2; security 9/9; Compose Mongo 13/13; lint/build passed; runtime image contains all 20 entries. Production and shop-PC use remain unverified.
 - 2026-10-17 — Added a loopback-only single-PC installer with isolated Compose project naming and expiring one-time setup code provisioning. PowerShell parser, Compose config, root tests (272 total; 259 passed, 0 failed, 13 skipped), lint/build, and Compose Mongo (13/13) passed. The installer has not been run against an actual shop; LAN HTTPS/production remains unverified.
+- 2026-10-18 — Added scheduled gzip Mongo backups with a database-read-only identity, age retention, and a tmpfs-only scratch restore/count comparison. Compose replica-set rehearsal restored the app database and matched collection counts (including 39 customer documents); lint/build and root tests passed (272 total: 259 passed, 0 failed, 13 skipped), Compose Mongo tests 13/13, and production Compose syntax validation passed. Caddy/TLS deployment, DNS/firewall, off-host backups, and owner acceptance remain unverified.
 - 2026-10-17 — Phase 7 completion audit added admin-only, `manage_users`-gated `/api/audit-logs`; Mongo integration test confirms a manager is denied even with that explicit key, admin effective permissions are honored, shop isolation holds, and raw before/after fields are omitted. Root tests then: 264 total (253 passed, 0 failed, 11 skipped); lint/build passed; Compose Mongo 11/11.
 - 2026-10-17 — Autopilot baseline re-run: lint/build passed, root tests 264 total (253 passed, 0 failed, 11 skipped), API security 9/9, Compose Mongo integration 11/11; added shell/PowerShell line-ending rules. Worktree was clean before this documentation batch; manual and production acceptance remain open.
 - 2026-10-17 — Phase 9 local hardening checks: strict-origin CORS, rate limits, generic errors, redaction, security headers, route/cashier sweeps, and audits; root tests 264 total (253 passed, 0 failed, 11 skipped), Compose Mongo 11/11, audits 0 vulnerabilities. Production acceptance and penetration testing remain open.
@@ -142,20 +144,23 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-18T08:23:12.510Z
+Generated at (UTC): 2026-10-18T08:57:47.629Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: add local shop installer
 - docs: record catalog verification status
 - feat: add safe starter catalog import
 - feat: add first-run pharmacy setup
 - feat: add API unavailable retry screen
-- feat: expose scoped admin audit log
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 
 Environment variable names from .env.example files (values are not read into this block):
+- ACME_EMAIL
 - APP_URL
+- BACKUP_INTERVAL_SECONDS
+- BACKUP_RETENTION_DAYS
 - BOOTSTRAP_SHOP_SLUG
 - COMPOSE_PROJECT_NAME
 - DEMO_MODE
@@ -164,9 +169,14 @@ Environment variable names from .env.example files (values are not read into thi
 - MONGO_APP_DB
 - MONGO_APP_PASSWORD
 - MONGO_APP_USERNAME
+- MONGO_BACKUP_PASSWORD
+- MONGO_BACKUP_USERNAME
 - MONGO_REPLICA_KEY
 - MONGO_ROOT_PASSWORD
 - MONGO_ROOT_USERNAME
+- PHARMA_API_IMAGE
+- PHARMA_WEB_IMAGE
+- PUBLIC_DOMAIN
 - REFRESH_TOKEN_PEPPER
 - SETUP_CODE_EXPIRES_AT
 - SETUP_CODE_HASH

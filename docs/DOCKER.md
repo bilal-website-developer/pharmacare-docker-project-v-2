@@ -12,6 +12,16 @@ For a new single-PC shop instance, use the installer in a separate extracted rel
 
 The installer refuses to overwrite an existing `.env`, creates a unique `COMPOSE_PROJECT_NAME` so each installation gets its own Compose-scoped `mongo_data` volume, builds and starts the stack, waits for API health, and displays an expiring first-run setup code once. Enter that code in the local setup wizard. The code itself is not stored; only its SHA-256 digest and expiry are written to the ignored `.env`. Never paste the code or `.env` values into chat. This local installer binds only to loopback; LAN access must wait for the HTTPS deployment configuration.
 
+Existing development `.env` files from before the backup service need its dedicated credential added once:
+
+```powershell
+.\docker\add-backup-credentials.ps1
+docker compose build mongo-init
+docker compose up --no-deps --force-recreate mongo-init
+```
+
+The helper writes a random, database-read-only Mongo backup user/password into the ignored `.env` without displaying either value. The backup service is opt-in for local use; run a one-time backup with `docker compose --profile backup run --rm mongo-backup backup-once`. Scheduled backup and the scratch restore rehearsal are documented in [`DEPLOYMENT.md`](./DEPLOYMENT.md).
+
 ## Requirements
 
 - Windows PowerShell 5.1 or later

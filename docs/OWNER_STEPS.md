@@ -13,6 +13,8 @@ The installer shows an expiring one-time code in the local PowerShell console; e
 
 The interactive `npm run seed:superadmin` CLI remains available for controlled owner-operated bootstrap when needed. It creates the initial shop and Super Admin; enter the password only at its hidden prompt. Do not run the CLI after the setup wizard has already created the shop, and do not delete a Mongo volume or reset credentials to bypass a setup guard.
 
+For existing `.env` files created before the backup service was added, run `.\docker\add-backup-credentials.ps1`, then `docker compose build mongo-init` and `docker compose up --no-deps --force-recreate mongo-init`. This adds a random dedicated read-only account for application-database backups. Keep `.env` private and never paste its contents into chat.
+
 After verifying the configured shop and deciding that the synthetic inactive examples are wanted, the Super Admin may run the optional starter catalog import:
 
 ```powershell
