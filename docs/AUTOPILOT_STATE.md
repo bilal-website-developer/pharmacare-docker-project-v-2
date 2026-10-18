@@ -2,7 +2,7 @@
 
 ## Current position
 
-> Current position: Step 1 verification rerun completed on 2026-10-18. Root lint/build passed; root tests 278 total (265 passed, 0 failed, 13 skipped); server security 9/9; Compose Mongo integration 13/13; local health returned `{"status":"ok","database":"ok"}`. A stale web container was recreated to apply the declared loopback-only bind. `git push origin feature/mongo-migration` was attempted but blocked because Git cannot prompt for HTTPS credentials; continue clean-install checks and retry push only if noninteractive authentication becomes available.
+> Current position: Step 1 checks passed locally on 2026-10-18, but the authorized push is blocked by missing noninteractive HTTPS credentials. Step 2 test directory `E:\ShopTest` was created as a local clone of the committed branch because remote cloning requires the same unavailable credentials; it has no `.env` or data directory. The original development Compose stack was stopped (not removed) to free port 8080. Next: run and inspect the installer in the test clone without exposing its one-time code.
 
 - Branch: `feature/mongo-migration`.
 - Recent commits: `e7dce1e` housekeeping, `9d3f0bb` admin audit-log endpoint, `d661142` API-unavailable retry screen, `029ee9e` first-run setup, `67c68d9` starter catalog.
@@ -11,6 +11,8 @@
 - `docker compose ps -a` showed Mongo healthy, API healthy, and `mongo-init` Exited (0). `curl.exe --silent --show-error --include http://localhost:8080/api/health` returned HTTP 200 and `{"status":"ok","database":"ok"}`.
 - The already-running web container was bound to `0.0.0.0:8080`, although current Compose declares `127.0.0.1:8080`. Ran `docker compose up --detach --force-recreate web`; `docker compose port web 80` then returned `127.0.0.1:8080`.
 - Tracked worktree was clean at step start. `.env` remains ignored. No `.env` values were displayed, no existing Mongo data volume was deleted/reset, and no Supabase data/schema or public service was changed.
+- `git push origin feature/mongo-migration` failed with `Cannot prompt because user interactivity has been disabled` / `unable to get password`; authentication is owner-pending.
+- Stopped (did not remove) the original Compose stack and created `E:\ShopTest` from the local committed branch. This clean source clone is not an authenticated clone of `origin`; it contains no `.env` and no Mongo data directory. The local-clone substitution was necessary because remote credentials are unavailable.
 
 ## Current verification evidence
 
@@ -38,7 +40,7 @@ The root test runner intentionally skips real-Mongo cases, which are exercised b
 ## Open risks and next work
 
 - The setup wizard requires installer-provisioned `SETUP_CODE_HASH` and `SETUP_CODE_EXPIRES_AT`; the current script sets them and displays the one-time code, but the real installation workflow remains unrun.
-- The installer has not been run against an actual shop directory or data volume. Production Compose/TLS has only been parsed and Caddyfile validated; DNS, firewall, certificate issuance, real host deployment, off-host archive copy, and disaster-recovery targets remain untested. Demo seed has not been run against an isolated demo database; the human role plan is pending. Phase 12 checklist is preparatory only; no cut-over execution is approved or performed.
+- The clean-clone installer test is in progress; no test-shop volume has been deleted. Production Compose/TLS has only been parsed and Caddyfile validated; DNS, firewall, certificate issuance, real host deployment, off-host archive copy, and disaster-recovery targets remain untested. Demo seed has not been run against an isolated demo database; the human role plan is pending. Phase 12 checklist is preparatory only; no cut-over execution is approved or performed.
 - Manual browser, LAN, printer/scanner, production, independent security, and legal acceptance remain owner-pending. Do not claim these are verified.
 
 ## Decisions

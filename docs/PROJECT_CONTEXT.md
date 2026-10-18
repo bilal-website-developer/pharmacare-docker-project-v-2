@@ -147,15 +147,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-18T09:54:44.159Z
+Generated at (UTC): 2026-10-18T09:55:43.043Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- docs: record blocked remote authentication
 - docs: record verification rerun before clean install
 - docs: prepare MongoDB cutover checklist
 - docs: clarify demo seed runtime setting
 - feat: add guarded demo seed and manual acceptance plan
-- feat: add Mongo backup and production deployment config
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 
