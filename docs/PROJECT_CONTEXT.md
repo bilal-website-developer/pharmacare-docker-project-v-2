@@ -98,6 +98,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 ## Current status
 
 - **Current checkout:** `feature/mongo-migration`. Phase 8 API coverage and Phase 9 local verification evidence are tracked in `docs/MONGO_MIGRATION.md`; manual UI and production security acceptance remain outstanding.
+- **New design phase:** this session adds `docs/CONTROL_PLANE_DESIGN.md` and `docs/CONTROL_PLANE_DECISIONS.md` as a Phase A plan. These files are design-only and do not implement or deploy a live control plane. Owner approval is still required before any code changes begin.
 - The Supabase implementation remains intact as the alternate backend. Owner-reported migration/ACL state and source-only barcode/Trash Bin changes are historical context, not live verification; do not run Supabase operations as part of the Mongo migration.
 - Existing UI behavior includes POS split tender, customer credit, cashier print requests, audited receipt-only print edits, role-based cost visibility, barcode/label workflows, stock alerts, and Trash Bin; API-mode adapters are implemented while manual acceptance remains pending.
 - Security and runtime gates still open: public production CORS/TLS and Mongo rate-limit load behavior, off-host backup, production deployment, human API-mode acceptance, and manual demo-shop testing. A local scratch restore rehearsal passed, but no production restore was done. Local security checks are recorded in `docs/MONGO_SECURITY_REPORT.md`; no penetration test was performed. The Phase 12 checklist is preparation only; keep Supabase code and migrations untouched until separate owner approval.
@@ -117,6 +118,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
+- 2026-10-18 — Added a Phase A control-plane design packet: `docs/CONTROL_PLANE_DESIGN.md` and `docs/CONTROL_PLANE_DECISIONS.md`. This is a plan-only artifact; no application code or deployment changes were made.
 - 2026-10-17 — Phase 8 API transport failures now show a themed retry screen in API mode; retry restores the cookie-backed session. Client test 6/6, lint/build passed; browser/shop-PC recovery remains unverified.
 - 2026-10-17 — Added first-run setup status and wizard plus a one-transaction shop/Super Admin/settings/audit bootstrap guarded by expiring, hash-checked setup code. Setup batch root tests: 269 total (257 passed, 0 failed, 12 skipped); security tests 9/9; Compose Mongo integration 12/12; lint/build passed. Installer code generation/display and browser acceptance remain open.
 - 2026-10-17 — Added a 20-entry fictional starter catalog and Super Admin-only transactional/idempotent importer; new entries are inactive, zero-priced, and have no stock. Current root tests: 272 total (259 passed, 0 failed, 13 skipped); focused catalog tests 2/2; security 9/9; Compose Mongo 13/13; lint/build passed; runtime image contains all 20 entries. Production and shop-PC use remain unverified.
@@ -149,15 +151,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-18T10:26:25.378Z
+Generated at (UTC): 2026-10-18T13:14:57.712Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- docs: record final local acceptance checks
 - docs: record clean installer verification
 - fix: pass shop slug into Docker API
 - docs: record clean-install test setup
 - docs: record blocked remote authentication
-- docs: record verification rerun before clean install
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 
