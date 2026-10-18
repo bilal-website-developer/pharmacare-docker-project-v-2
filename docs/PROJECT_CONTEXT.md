@@ -151,15 +151,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-18T13:21:59.137Z
-Git branch: feature/mongo-migration
+Generated at (UTC): 2026-10-18T13:41:23.954Z
+Git branch: feature/control-plane
 
 Last 5 commit subjects:
+- docs: control plane design
 - docs: control plane design
 - docs: record final local acceptance checks
 - docs: record clean installer verification
 - fix: pass shop slug into Docker API
-- docs: record clean-install test setup
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 
