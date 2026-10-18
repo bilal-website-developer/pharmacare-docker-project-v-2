@@ -124,6 +124,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - 2026-10-18 — Added scheduled gzip Mongo backups with a database-read-only identity, age retention, and a tmpfs-only scratch restore/count comparison. Compose replica-set rehearsal restored the app database and matched collection counts (including 39 customer documents); lint/build and root tests passed (272 total: 259 passed, 0 failed, 13 skipped), Compose Mongo tests 13/13, and production Compose syntax validation passed. Caddy/TLS deployment, DNS/firewall, off-host backups, and owner acceptance remain unverified.
 - 2026-10-18 — Added a demo-only transactional seed with development/test, explicit flag, and demo-database guards plus a five-role, module-by-module manual acceptance plan. The Compose runner uses `DEMO_NODE_ENV` and defaults to production; automated seed tests and full validation results are recorded in the migration tracker; no human browser acceptance or production use was performed.
 - 2026-10-18 — Prepared `docs/CUTOVER_CHECKLIST.md` for a future owner-approved Phase 12. No Supabase client, folder, migration, live project, or data was removed or changed; cut-over remains unstarted and gated on manual acceptance.
+- 2026-10-18 — Ran a clean local installer clone; first run exposed missing `BOOTSTRAP_SHOP_SLUG` Compose wiring, fixed it for API/test runner and added a Mongo integration assertion. Fresh rerun passed setup/login/refresh, loopback binding, and Mongo unpublished-port checks. Test-install credentials are outside the repository; remote push remains owner-pending for HTTPS authentication.
 - 2026-10-17 — Phase 7 completion audit added admin-only, `manage_users`-gated `/api/audit-logs`; Mongo integration test confirms a manager is denied even with that explicit key, admin effective permissions are honored, shop isolation holds, and raw before/after fields are omitted. Root tests then: 264 total (253 passed, 0 failed, 11 skipped); lint/build passed; Compose Mongo 11/11.
 - 2026-10-17 — Autopilot baseline re-run: lint/build passed, root tests 264 total (253 passed, 0 failed, 11 skipped), API security 9/9, Compose Mongo integration 11/11; added shell/PowerShell line-ending rules. Worktree was clean before this documentation batch; manual and production acceptance remain open.
 - 2026-10-17 — Phase 9 local hardening checks: strict-origin CORS, rate limits, generic errors, redaction, security headers, route/cashier sweeps, and audits; root tests 264 total (253 passed, 0 failed, 11 skipped), Compose Mongo 11/11, audits 0 vulnerabilities. Production acceptance and penetration testing remain open.
@@ -147,15 +148,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-18T10:10:54.320Z
+Generated at (UTC): 2026-10-18T10:17:13.322Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- fix: pass shop slug into Docker API
 - docs: record clean-install test setup
 - docs: record blocked remote authentication
 - docs: record verification rerun before clean install
 - docs: prepare MongoDB cutover checklist
-- docs: clarify demo seed runtime setting
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 
