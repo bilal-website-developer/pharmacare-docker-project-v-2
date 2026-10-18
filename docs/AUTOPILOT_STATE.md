@@ -2,7 +2,7 @@
 
 ## Current position
 
-> Current position: Step 1 verification rerun completed on 2026-10-18. Root lint/build passed; root tests 278 total (265 passed, 0 failed, 13 skipped); server security 9/9; Compose Mongo integration 13/13; local health returned `{"status":"ok","database":"ok"}`. A stale web container was recreated to apply the declared loopback-only bind. Next: authorized branch push, then clean-install verification in `E:\ShopTest`.
+> Current position: Step 1 verification rerun completed on 2026-10-18. Root lint/build passed; root tests 278 total (265 passed, 0 failed, 13 skipped); server security 9/9; Compose Mongo integration 13/13; local health returned `{"status":"ok","database":"ok"}`. A stale web container was recreated to apply the declared loopback-only bind. `git push origin feature/mongo-migration` was attempted but blocked because Git cannot prompt for HTTPS credentials; continue clean-install checks and retry push only if noninteractive authentication becomes available.
 
 - Branch: `feature/mongo-migration`.
 - Recent commits: `e7dce1e` housekeeping, `9d3f0bb` admin audit-log endpoint, `d661142` API-unavailable retry screen, `029ee9e` first-run setup, `67c68d9` starter catalog.
