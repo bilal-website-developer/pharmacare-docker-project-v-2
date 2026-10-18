@@ -92,6 +92,12 @@ Decisions recorded while finishing the migration. Revisit a decision only when n
 - **Alternatives:** Permit production mode with an explicit flag; seed opening stock and synthetic purchases; allow demo records in a regular shop database.
 - **Reason:** A production-mode default and database-name suffix provide independent safeguards against accidental demo data in a real shop. With no opening stock, a tester must create stock through the normal purchase workflow before POS cases, exercising the real workflow rather than introducing unexplained inventory/cost/cash-book entries. Demo data is idempotent and conflicts abort rather than overwrite existing records.
 
+### Cut-over is preparation-only
+
+- **Decision:** Phase 12 adds only a checklist; Supabase removal/archive remains a separate explicit owner-approved task after browser acceptance and operational gates.
+- **Alternatives:** Remove the Supabase client and archive `supabase/` when writing the checklist; infer approval from the migration plan.
+- **Reason:** The legacy backend and migrations must remain available until manual acceptance and the owner authorizes a distinct cut-over execution.
+
 
 ### Restore rehearsal target and comparison
 

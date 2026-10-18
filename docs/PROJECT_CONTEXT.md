@@ -6,7 +6,7 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging coexist with the legacy Supabase implementation. Phases 0–9 have local test evidence; Phase 8 browser acceptance remains open. Phase 10 has a locally rehearsed Mongo archive/restore path and an undeployed Caddy production overlay; production acceptance remains open. Phase 11 has an opt-in, guarded demo seed and a manual acceptance plan; neither has been run through human browser acceptance. Phase 12 cut-over preparation remains not started.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging coexist with the legacy Supabase implementation. Phases 0–9 have local test evidence; Phase 8 browser acceptance remains open. Phase 10 has a locally rehearsed Mongo archive/restore path and an undeployed Caddy production overlay; production acceptance remains open. Phase 11 has an opt-in, guarded demo seed and a manual acceptance plan; neither has been run through human browser acceptance. Phase 12 has a preparation-only checklist; execution remains unstarted.
 
 - Latest modules: Products, Stock Inventory, and Trash Bin use typed API adapters; the Vite proxy targets Compose API `:3000` by default with a `VITE_API_PROXY_TARGET` override for host Fastify `:3001`. Supabase fallback remains available.
 
@@ -100,7 +100,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - **Current checkout:** `feature/mongo-migration`. Phase 8 API coverage and Phase 9 local verification evidence are tracked in `docs/MONGO_MIGRATION.md`; manual UI and production security acceptance remain outstanding.
 - The Supabase implementation remains intact as the alternate backend. Owner-reported migration/ACL state and source-only barcode/Trash Bin changes are historical context, not live verification; do not run Supabase operations as part of the Mongo migration.
 - Existing UI behavior includes POS split tender, customer credit, cashier print requests, audited receipt-only print edits, role-based cost visibility, barcode/label workflows, stock alerts, and Trash Bin; API-mode adapters are implemented while manual acceptance remains pending.
-- Security and runtime gates still open: public production CORS/TLS and Mongo rate-limit load behavior, off-host backup, production deployment, human API-mode acceptance, and manual demo-shop testing. A local scratch restore rehearsal passed, but no production restore was done. Local security checks are recorded in `docs/MONGO_SECURITY_REPORT.md`; no penetration test was performed. Keep Supabase code and migrations untouched.
+- Security and runtime gates still open: public production CORS/TLS and Mongo rate-limit load behavior, off-host backup, production deployment, human API-mode acceptance, and manual demo-shop testing. A local scratch restore rehearsal passed, but no production restore was done. Local security checks are recorded in `docs/MONGO_SECURITY_REPORT.md`; no penetration test was performed. The Phase 12 checklist is preparation only; keep Supabase code and migrations untouched until separate owner approval.
 
 ## Known issues and Later
 
@@ -123,6 +123,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - 2026-10-17 — Added a loopback-only single-PC installer with isolated Compose project naming and expiring one-time setup code provisioning. PowerShell parser, Compose config, root tests (272 total; 259 passed, 0 failed, 13 skipped), lint/build, and Compose Mongo (13/13) passed. The installer has not been run against an actual shop; LAN HTTPS/production remains unverified.
 - 2026-10-18 — Added scheduled gzip Mongo backups with a database-read-only identity, age retention, and a tmpfs-only scratch restore/count comparison. Compose replica-set rehearsal restored the app database and matched collection counts (including 39 customer documents); lint/build and root tests passed (272 total: 259 passed, 0 failed, 13 skipped), Compose Mongo tests 13/13, and production Compose syntax validation passed. Caddy/TLS deployment, DNS/firewall, off-host backups, and owner acceptance remain unverified.
 - 2026-10-18 — Added a demo-only transactional seed with development/test, explicit flag, and demo-database guards plus a five-role, module-by-module manual acceptance plan. The Compose runner uses `DEMO_NODE_ENV` and defaults to production; automated seed tests and full validation results are recorded in the migration tracker; no human browser acceptance or production use was performed.
+- 2026-10-18 — Prepared `docs/CUTOVER_CHECKLIST.md` for a future owner-approved Phase 12. No Supabase client, folder, migration, live project, or data was removed or changed; cut-over remains unstarted and gated on manual acceptance.
 - 2026-10-17 — Phase 7 completion audit added admin-only, `manage_users`-gated `/api/audit-logs`; Mongo integration test confirms a manager is denied even with that explicit key, admin effective permissions are honored, shop isolation holds, and raw before/after fields are omitted. Root tests then: 264 total (253 passed, 0 failed, 11 skipped); lint/build passed; Compose Mongo 11/11.
 - 2026-10-17 — Autopilot baseline re-run: lint/build passed, root tests 264 total (253 passed, 0 failed, 11 skipped), API security 9/9, Compose Mongo integration 11/11; added shell/PowerShell line-ending rules. Worktree was clean before this documentation batch; manual and production acceptance remain open.
 - 2026-10-17 — Phase 9 local hardening checks: strict-origin CORS, rate limits, generic errors, redaction, security headers, route/cashier sweeps, and audits; root tests 264 total (253 passed, 0 failed, 11 skipped), Compose Mongo 11/11, audits 0 vulnerabilities. Production acceptance and penetration testing remain open.
@@ -146,15 +147,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-18T09:38:57.402Z
+Generated at (UTC): 2026-10-18T09:39:31.773Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- docs: clarify demo seed runtime setting
 - feat: add guarded demo seed and manual acceptance plan
 - feat: add Mongo backup and production deployment config
 - feat: add local shop installer
 - docs: record catalog verification status
-- feat: add safe starter catalog import
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 

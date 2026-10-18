@@ -2,18 +2,18 @@
 
 ## Current position
 
-> Current position: first-run setup is committed as `029ee9e`; starter catalog is committed as `67c68d9`; installer batch is committed as `d6207f1`; Phase 10 backup/production config is committed as `4f8993c`. Phase 11 demo seed and manual plan are in the current uncommitted batch. Human/browser acceptance remains outstanding; Phase 12 preparation remains next.
+> Current position: first-run setup is committed as `029ee9e`; starter catalog is committed as `67c68d9`; installer batch is committed as `d6207f1`; Phase 10 backup/production config is committed as `4f8993c`; Phase 11 demo seed/manual plan is committed as `dfff34a`. Phase 12 preparation is now written; manual/browser acceptance, production operations, and cut-over execution remain outstanding.
 
 - Branch: `feature/mongo-migration`.
 - Recent commits: `e7dce1e` housekeeping, `9d3f0bb` admin audit-log endpoint, `d661142` API-unavailable retry screen, `029ee9e` first-run setup, `67c68d9` starter catalog.
-- Current uncommitted worktree includes Phase 11 guarded demo seeding/manual test plan; Phase 10 is committed.
+- Current uncommitted worktree is the Phase 12 documentation batch; Phases 10 and 11 are committed.
 - No `.env` values were read or printed; no existing Mongo data volume was deleted/reset; no Supabase files/data/schema, remote branches, or public services were changed. The local backup volume and empty Caddy volumes were created for validation.
 
 ## Current verification evidence
 
 | Command | Result |
 |---|---|
-| `npm.cmd test` | 278 total, 265 passed, 0 failed, 13 skipped |
+| `npm.cmd test` | Phase 11: 278 total, 265 passed, 0 failed, 13 skipped |
 | `npm.cmd run lint` | Passed |
 | `npm.cmd run build` | Passed; existing Vite `__dirname` and large-chunk warnings |
 | `npm.cmd --prefix server run test:security` | Phase 10 baseline: 9 passed, 0 failed, 0 skipped |
@@ -35,7 +35,7 @@ The root test runner intentionally skips real-Mongo cases, which are exercised b
 ## Open risks and next work
 
 - The setup wizard requires installer-provisioned `SETUP_CODE_HASH` and `SETUP_CODE_EXPIRES_AT`; the current script sets them and displays the one-time code, but the real installation workflow remains unrun.
-- The installer has not been run against an actual shop directory or data volume. Production Compose/TLS has only been parsed and Caddyfile validated; DNS, firewall, certificate issuance, real host deployment, off-host archive copy, and disaster-recovery targets remain untested. Demo seed has not been run against an isolated demo database; the human role plan is pending. Phase 12 preparation has not started; no cut-over execution is approved or performed.
+- The installer has not been run against an actual shop directory or data volume. Production Compose/TLS has only been parsed and Caddyfile validated; DNS, firewall, certificate issuance, real host deployment, off-host archive copy, and disaster-recovery targets remain untested. Demo seed has not been run against an isolated demo database; the human role plan is pending. Phase 12 checklist is preparatory only; no cut-over execution is approved or performed.
 - Manual browser, LAN, printer/scanner, production, independent security, and legal acceptance remain owner-pending. Do not claim these are verified.
 
 ## Decisions

@@ -20,7 +20,7 @@ This file tracks migration phase deliverables and verification. It does not auth
 | 9 | Security hardening | Local checks complete; production security acceptance open | [`MONGO_SECURITY_REPORT.md`](./MONGO_SECURITY_REPORT.md) records source/test, audit, Compose health, and CORS evidence. This is not a penetration test. |
 | 10 | Backups and production deployment | Local backup/restore rehearsal passed; production overlay written, not deployed | The replica-set backup produced a compressed archive; restore to an isolated tmpfs scratch Mongo matched collection counts. `docker-compose.prod.yml` and [`DEPLOYMENT.md`](./DEPLOYMENT.md) define Caddy/TLS and host operations. Public DNS, TLS issuance, firewall, off-host backup, and production acceptance remain unverified. |
 | 11 | Demo data and manual test plan | Written; seed guard tests and project checks passed; human acceptance not run | `server/src/demo-seed.ts` seeds fictional `DEMO -` catalog/customer/supplier records transactionally and idempotently. It requires `NODE_ENV=development|test`, `DEMO_MODE=true`, and an app database ending in `demo`; it refuses to run otherwise. The fixtures intentionally have no opening stock, so use the purchase flow before POS cases. `docs/MANUAL_TEST_PLAN.md` covers all roles and workflows but has not been executed by a human. `npm.cmd test`: 278 total, 265 passed, 0 failed, 13 skipped; `npm.cmd run lint` and `npm.cmd run build` passed; `npm.cmd run test:demo-seed`: 3 passed, 0 failed, 0 skipped; `docker compose config --quiet` passed with temporary fake values for required backup credentials. |
-| 12 | Cut-over and Supabase cleanup | Not started | Preparation requires manual acceptance and separate owner approval. No Supabase file, migration, project, or data may be removed or changed without explicit approval. |
+| 12 | Cut-over and Supabase cleanup | Preparation written; execution not started | [`CUTOVER_CHECKLIST.md`](./CUTOVER_CHECKLIST.md) records preconditions and planned removal/archive actions. No Supabase file, migration, project, or data was touched; execution requires separate owner approval and manual acceptance. |
 
 ## Autopilot step 0 — housekeeping
 
@@ -91,6 +91,16 @@ Validation for this step: `npm.cmd run lint` and `npm.cmd run build` exited 0;
 for the required backup username/password. No `.env` values were printed, no
 demo seed was run against a database, and real-Mongo business integration
 tests were not rerun for the seed feature.
+
+## Autopilot step 8 — Phase 12 preparation
+
+**Status: WRITTEN-UNVERIFIED as a preparation document; execution not started.**
+`docs/CUTOVER_CHECKLIST.md` records the acceptance and operational preconditions,
+candidate frontend Supabase/dead-component cleanup, proposed `supabase/`
+archival, and future execution evidence. It explicitly authorizes no cleanup,
+move, deployment, merge, push, or live Supabase operation. No Supabase file,
+migration, project, or data was touched. Human acceptance and separate owner
+approval remain prerequisites.
 
 
 ## Phase 1 verification and open items
