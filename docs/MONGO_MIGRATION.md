@@ -326,3 +326,13 @@ Implemented route paths include `/api/returns/policy`, `/api/returns/sales/:invo
 - `npm.cmd test`: 272 total, 259 passed, 0 failed, 13 skipped. The root command includes API client/data unit tests; real-Mongo tests are exercised separately through Compose.
 - `npm.cmd run lint` and `npm.cmd run build` exited 0; `npm.cmd --prefix server run test:security` reported 9 passed, 0 failed, 0 skipped.
 - `docker compose run --build --rm --no-deps --entrypoint node api -e "import('node:fs/promises').then(async ({readFile}) => { const rows = JSON.parse(await readFile('/app/data/starter-catalog.json', 'utf8')); console.log(JSON.stringify({starterCatalogEntries: rows.length})); })"` returned `{"starterCatalogEntries":20}`, confirming the file is present in the production runtime image. Do not run the seed command against a shop before verifying the configured shop slug and confirming these demo-named inactive records are wanted.
+
+## Single-PC shop installer
+
+**Status: WRITTEN-UNVERIFIED for an actual shop installation.** `docker/install-shop.ps1` generates per-install Mongo/auth secrets, a unique Compose project name, and a random setup code; it writes the code hash/expiry (not plaintext) to the ignored `.env`, validates Compose, builds/starts services, and checks the API/setup status. Compose now binds the development/single-PC web UI to loopback; MongoDB and the API remain unpublished. This gives each extracted installation directory a separate Compose-scoped Mongo volume.
+
+- `[System.Management.Automation.Language.Parser]::ParseFile(...)` reported `PowerShell syntax parse passed`.
+- `docker compose config --quiet` exited 0.
+- Installer-step regression checks: `npm.cmd test` reported 272 total tests (259 passed, 0 failed, 13 skipped), `docker compose run --build --rm --no-deps api-test` reported 13 passed/0 failed/0 skipped, `npm.cmd run lint` exited 0, and `npm.cmd run build` exited 0.
+- No shop `.env` or volume was created, no actual installation was run, and no setup code was generated during validation.
+- Open: manual shop-PC run, LAN HTTPS/reverse proxy, production Compose/certificate flow, update/uninstall/restore tools, and backup rehearsal. The current installer is local-only and does not configure Windows firewall or expose the app to LAN clients.

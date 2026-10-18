@@ -133,7 +133,7 @@ services:
         VITE_SHOP_SLUG: ${VITE_SHOP_SLUG:-main}
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     depends_on:
       api:
         condition: service_healthy

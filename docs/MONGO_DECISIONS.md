@@ -52,13 +52,19 @@ Decisions recorded while finishing the migration. Revisit a decision only when n
 
 - **Decision:** The setup API accepts a plaintext code only over the local setup form, compares its SHA-256 digest in constant time against `SETUP_CODE_HASH`, enforces `SETUP_CODE_EXPIRES_AT`, and atomically consumes a unique Mongo setup marker with the first shop/Super Admin transaction. The future installer generates and displays the code and must not log or persist its plaintext.
 - **Alternatives:** Leave bootstrap as CLI-only; store the plaintext code in Mongo; allow setup without a code on a private network.
-- **Reason:** Provide a guided shop-PC setup while retaining one-time use, bounded validity, and no stored plaintext bootstrap credential. The installer lifecycle and end-user experience remain to be implemented/tested.
+- **Reason:** Provide a guided shop-PC setup while retaining one-time use, bounded validity, and no stored plaintext bootstrap credential. The installer script is implemented, but its actual shop installation and end-user workflow remain untested.
 
 ### Starter catalog safety defaults
 
 - **Decision:** Keep the 20-entry starter catalog fictional and free of price/cost/stock/batch/expiry values. Import only missing medicine codes in a Mongo transaction, create inactive products with zero-paisa default units, and skip existing codes without overwriting shop data.
 - **Alternatives:** Import as active products; invent default prices or stock; update existing matching codes during a repeat import.
 - **Reason:** Avoid accidental sales, fabricated financial/inventory data, and destructive overwrites while still giving a shop an optional structured starting catalog. Owners must validate identities, set actual prices, and explicitly activate items.
+
+### Shop-local Compose isolation
+
+- **Decision:** The single-PC installer assigns a unique `COMPOSE_PROJECT_NAME` per installation so Docker Compose scopes the Mongo data volume independently, and the development/single-PC web port binds to `127.0.0.1` only. Multi-PC LAN access requires the separately reviewed HTTPS deployment.
+- **Alternatives:** Reuse one Compose project name and shared volume; publish the local HTTP UI on all interfaces; attempt ad hoc firewall rules in the installer.
+- **Reason:** Prevent accidental cross-shop volume/container reuse and avoid exposing passwords/session traffic over LAN HTTP. The installer does not modify Windows firewall state.
 
 ### API security defaults
 
