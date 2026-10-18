@@ -1,6 +1,7 @@
 import { apiRequest } from '../api';
 
 export interface FirstRunSetupInput {
+  activationCode: string;
   setupCode: string;
   shopName: string;
   phone: string;

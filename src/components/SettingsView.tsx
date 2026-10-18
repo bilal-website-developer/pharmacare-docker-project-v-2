@@ -215,7 +215,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <p className="text-xs text-muted">This information will appear on your prints and invoices.</p>
           {!canEditShopIdentity && (
             <p role="status" className="mt-2 rounded-control bg-surface px-3 py-2 text-xs text-muted">
-              Only a Super Admin can edit shop identity in API mode.
+              Only an Admin can edit shop identity in API mode.
             </p>
           )}
         </div>

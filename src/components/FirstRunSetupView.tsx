@@ -26,6 +26,7 @@ function passwordChecks(password: string): Array<{ label: string; passed: boolea
 
 export function FirstRunSetupView({ onComplete }: FirstRunSetupViewProps) {
   const [setupCode, setSetupCode] = useState('');
+  const [activationCode, setActivationCode] = useState('');
   const [shopName, setShopName] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
@@ -38,23 +39,26 @@ export function FirstRunSetupView({ onComplete }: FirstRunSetupViewProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Readonly<Record<string, string>>>({});
   const checks = passwordChecks(password);
   const passwordsMatch = password.length > 0 && password === confirmation;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!checks.every((check) => check.passed)) {
-      setError('Choose a stronger password that meets all listed requirements.');
+      setError('Password: choose a stronger password that meets all listed requirements.');
       return;
     }
     if (!passwordsMatch) {
-      setError('The password confirmation does not match.');
+      setError('Confirm password: the password confirmation does not match.');
       return;
     }
     setLoading(true);
     setError('');
+    setFieldErrors({});
     try {
       await completeFirstRunSetup({
+        activationCode,
         setupCode,
         shopName,
         phone,
@@ -68,13 +72,17 @@ export function FirstRunSetupView({ onComplete }: FirstRunSetupViewProps) {
       setPassword('');
       setConfirmation('');
       setSetupCode('');
+      setActivationCode('');
       onComplete();
     } catch (caught) {
-      setError(caught instanceof ApiError
-        ? caught.message
-        : caught instanceof Error
+      if (caught instanceof ApiError) {
+        setFieldErrors(caught.fieldErrors);
+        setError(caught.message);
+      } else {
+        setError(caught instanceof Error
           ? caught.message
           : 'Setup could not be completed. Please check the details and try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -86,7 +94,7 @@ export function FirstRunSetupView({ onComplete }: FirstRunSetupViewProps) {
         <header className="mb-6 text-center">
           <PharmaLogo size={10} className="mx-auto" />
           <h1 className="mt-4 text-2xl font-bold">Set up this pharmacy</h1>
-          <p className="mt-2 text-sm text-muted">Create the shop and its first Super Admin account.</p>
+          <p className="mt-2 text-sm text-muted">Create the shop and its first Admin account.</p>
         </header>
         <form onSubmit={(event) => void handleSubmit(event)} className="space-y-6 rounded-card border border-border bg-white p-5 shadow-lg sm:p-7">
           <section aria-labelledby="shop-details-title">
@@ -98,18 +106,22 @@ export function FirstRunSetupView({ onComplete }: FirstRunSetupViewProps) {
               <label className="space-y-1.5 text-sm font-semibold sm:col-span-2">
                 Pharmacy name
                 <input required maxLength={160} value={shopName} onChange={(event) => setShopName(event.target.value)} className={inputClass} />
+                {fieldErrors.shopName && <span role="alert" className="block text-xs text-danger">{fieldErrors.shopName}</span>}
               </label>
               <label className="space-y-1.5 text-sm font-semibold">
                 Phone
                 <input maxLength={80} autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} className={inputClass} />
+                {fieldErrors.phone && <span role="alert" className="block text-xs text-danger">{fieldErrors.phone}</span>}
               </label>
               <label className="space-y-1.5 text-sm font-semibold">
                 Shop time zone
                 <input required maxLength={100} value={timeZone} onChange={(event) => setTimeZone(event.target.value)} className={inputClass} />
+                {fieldErrors.timeZone && <span role="alert" className="block text-xs text-danger">{fieldErrors.timeZone}</span>}
               </label>
               <label className="space-y-1.5 text-sm font-semibold sm:col-span-2">
                 Address
                 <textarea maxLength={1000} rows={2} value={address} onChange={(event) => setAddress(event.target.value)} className={inputClass} />
+                {fieldErrors.address && <span role="alert" className="block text-xs text-danger">{fieldErrors.address}</span>}
               </label>
             </div>
           </section>
@@ -117,26 +129,30 @@ export function FirstRunSetupView({ onComplete }: FirstRunSetupViewProps) {
           <section aria-labelledby="owner-details-title">
             <h2 id="owner-details-title" className="mb-4 flex items-center gap-2 text-lg font-bold">
               <UserRound aria-hidden="true" size={19} className="text-primary" />
-              Super Admin account
+              Admin account
             </h2>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-1.5 text-sm font-semibold">
                 Username
                 <input required minLength={1} maxLength={64} autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} className={inputClass} />
+                {fieldErrors.username && <span role="alert" className="block text-xs text-danger">{fieldErrors.username}</span>}
               </label>
               <label className="space-y-1.5 text-sm font-semibold">
                 Full name
                 <input required maxLength={160} autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} className={inputClass} />
+                {fieldErrors.fullName && <span role="alert" className="block text-xs text-danger">{fieldErrors.fullName}</span>}
               </label>
               <label className="space-y-1.5 text-sm font-semibold sm:col-span-2">
                 Email
                 <input required type="email" maxLength={254} autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} className={inputClass} />
+                {fieldErrors.email && <span role="alert" className="block text-xs text-danger">{fieldErrors.email}</span>}
               </label>
               <label className="space-y-1.5 text-sm font-semibold">
                 Password
                 <span className="relative block">
                   <LockKeyhole aria-hidden="true" size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
                   <input required type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} className={`${inputClass} pl-10 pr-11`} />
+                  {fieldErrors.password && <span role="alert" className="block text-xs text-danger">{fieldErrors.password}</span>}
                   <button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute inset-y-0 right-0 px-3 text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
                     {showPassword ? <EyeOff aria-hidden="true" size={17} /> : <Eye aria-hidden="true" size={17} />}
                   </button>
@@ -159,6 +175,18 @@ export function FirstRunSetupView({ onComplete }: FirstRunSetupViewProps) {
             </ul>
           </section>
 
+          <section aria-labelledby="activation-code-title">
+            <h2 id="activation-code-title" className="mb-3 flex items-center gap-2 text-lg font-bold">
+              <KeyRound aria-hidden="true" size={19} className="text-primary" />
+              Activation code
+            </h2>
+            <label className="space-y-1.5 text-sm font-semibold">
+              Enter the one-time activation code from the shop owner
+              <input required minLength={12} maxLength={128} autoComplete="off" spellCheck={false} value={activationCode} onChange={(event) => setActivationCode(event.target.value)} className={`${inputClass} font-mono`} />
+              {fieldErrors.activationCode && <span role="alert" className="block text-xs text-danger">{fieldErrors.activationCode}</span>}
+            </label>
+          </section>
+
           <section aria-labelledby="setup-code-title">
             <h2 id="setup-code-title" className="mb-3 flex items-center gap-2 text-lg font-bold">
               <KeyRound aria-hidden="true" size={19} className="text-primary" />
@@ -167,6 +195,7 @@ export function FirstRunSetupView({ onComplete }: FirstRunSetupViewProps) {
             <label className="space-y-1.5 text-sm font-semibold">
               Enter the code shown by the installer
               <input required minLength={32} maxLength={128} autoComplete="off" spellCheck={false} value={setupCode} onChange={(event) => setSetupCode(event.target.value)} className={`${inputClass} font-mono`} />
+              {fieldErrors.setupCode && <span role="alert" className="block text-xs text-danger">{fieldErrors.setupCode}</span>}
             </label>
           </section>
 

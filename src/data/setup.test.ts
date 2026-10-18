@@ -29,6 +29,7 @@ test('posts setup details and accepts only the created acknowledgement', async (
   };
   const setupCode = 'random-one-time-setup-code-value-0123456789';
   await completeFirstRunSetup({
+    activationCode: 'activation-code-test-1234',
     setupCode,
     shopName: 'Example Pharmacy',
     phone: '',
@@ -40,11 +41,13 @@ test('posts setup details and accepts only the created acknowledgement', async (
     password: 'Strong-Setup-Password-47!',
   });
   assert.equal(calls[0].url, '/api/setup');
+  assert.equal(JSON.parse(calls[0].body ?? '{}').activationCode, 'activation-code-test-1234');
   assert.equal(JSON.parse(calls[0].body ?? '{}').setupCode, setupCode);
 
   globalThis.fetch = async () => Response.json({ error: 'SETUP_ALREADY_COMPLETED' }, { status: 409 });
   await assert.rejects(
     completeFirstRunSetup({
+      activationCode: 'activation-code-test-1234',
       setupCode,
       shopName: 'Example Pharmacy',
       phone: '',

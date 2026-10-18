@@ -19,7 +19,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   businessReport,
   totalOrders,
 }) => {
-  const canSeeProfit = currentRole === UserRole.ADMIN || currentRole === UserRole.SUPER_ADMIN || currentRole === UserRole.ACCOUNTANT;
+  const canSeeProfit = currentRole === UserRole.ADMIN || currentRole === UserRole.ACCOUNTANT;
 
   const postedSales = sales.filter((sale) => sale.status !== 'VOID');
   const totalRevenuePaisa = postedSales.reduce((sum, s) => sum + s.totalPaisa, 0);

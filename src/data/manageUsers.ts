@@ -31,7 +31,7 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
 
 function parseRole(value: unknown): value is UserRole {
   return value === 'cashier' || value === 'manager' || value === 'accountant'
-    || value === 'admin' || value === 'super_admin';
+    || value === 'admin';
 }
 
 function parsePermission(value: unknown): value is PermissionKey {

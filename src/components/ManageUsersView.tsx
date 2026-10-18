@@ -69,7 +69,6 @@ function roleClass(role: UserRole) {
     case UserRole.MANAGER: return 'bg-orange-100 text-orange-800';
     case UserRole.ACCOUNTANT: return 'bg-teal-100 text-teal-800';
     case UserRole.ADMIN: return 'bg-purple-100 text-purple-800';
-    case UserRole.SUPER_ADMIN: return 'bg-red-100 text-red-800';
   }
 }
 
@@ -82,7 +81,6 @@ export function ManageUsersView({
   currentRole: UserRole;
   onChangePassword: () => void;
 }) {
-  const isSuperAdmin = currentRole === UserRole.SUPER_ADMIN;
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [currentCount, setCurrentCount] = useState(0);
   const [assignableRoles, setAssignableRoles] = useState<UserRole[]>([]);
@@ -196,7 +194,7 @@ export function ManageUsersView({
         email,
         ...(!editingId ? { password: form.password } : {}),
         role: form.role,
-        permissions: form.role === UserRole.SUPER_ADMIN
+        permissions: form.role === UserRole.ADMIN
           ? MODULES.map(({ key }) => key)
           : form.permissions,
         is_active: form.is_active,
@@ -311,15 +309,15 @@ export function ManageUsersView({
 
           <fieldset disabled={editingId === currentUserId} className="rounded-control border border-border p-4 disabled:opacity-70">
             <legend className="px-2 text-sm font-bold text-text">Allowed Modules (Custom Permissions)</legend>
-            {form.role === UserRole.SUPER_ADMIN && <p className="mb-3 text-xs font-semibold text-muted">This role can access every module.</p>}
+            {form.role === UserRole.ADMIN && <p className="mb-3 text-xs font-semibold text-muted">Admins can access every module.</p>}
             {form.role === UserRole.ADMIN && <p className="mb-3 text-xs font-semibold text-muted">Select the modules this admin is allowed to access.</p>}
             <div className="grid gap-3 sm:grid-cols-2">
               {MODULES.filter(({ key }) => grantablePermissions.includes(key)).map(({ key, label }) => (
                 <label key={key} className="flex items-center gap-2 text-sm text-text">
                   <input
                     type="checkbox"
-                    checked={form.role === UserRole.SUPER_ADMIN || form.permissions.includes(key)}
-                    disabled={form.role === UserRole.SUPER_ADMIN || (form.role === UserRole.ADMIN && !isSuperAdmin)}
+                    checked={form.role === UserRole.ADMIN || form.permissions.includes(key)}
+                    disabled={form.role === UserRole.ADMIN}
                     onChange={(event) => setForm({
                       ...form,
                       permissions: setModulePermission(
@@ -339,8 +337,8 @@ export function ManageUsersView({
               <label className="mt-3 flex items-center gap-2 text-sm text-text">
                 <input
                   type="checkbox"
-                  checked={form.role === UserRole.SUPER_ADMIN || form.permissions.includes('stock_alerts')}
-                  disabled={form.role === UserRole.SUPER_ADMIN || (form.role === UserRole.ADMIN && !isSuperAdmin)}
+                  checked={form.role === UserRole.ADMIN || form.permissions.includes('stock_alerts')}
+                  disabled={form.role === UserRole.ADMIN}
                   onChange={(event) => {
                     const permissions = new Set(form.permissions);
                     if (event.target.checked) permissions.add('stock_alerts');

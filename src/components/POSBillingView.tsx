@@ -43,7 +43,7 @@ import { findProductByScan, normalizeScannedValue, useBarcodeScanner } from '../
 import { loadPosCatalog } from '../data/posCatalog';
 import { getRequiredSmallestUnits, type PosCatalogProduct } from '../data/posCatalogLogic';
 import { STOCK_CHANGED_EVENT } from '../utils/stockAlertsEvents';
-import { loadPosCustomers, postSale, type PostSaleInput, type PrescriptionDetails } from '../data/sales';
+import { getSaleDraftToken, loadPosCustomers, postSale, type PostSaleInput, type PrescriptionDetails } from '../data/sales';
 import { SaleReturnsPanel } from './returns/SaleReturnsPanel';
 
 interface POSBillingViewProps {
@@ -105,6 +105,7 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
   const [tenderedAmountPKR, setTenderedAmountPKR] = useState<number>(0);
   const [splitCashPaymentPKR, setSplitCashPaymentPKR] = useState<number>(0);
   const [isPostingSale, setIsPostingSale] = useState(false);
+  const [saleDraftToken, setSaleDraftToken] = useState<string | null>(null);
   const [saleError, setSaleError] = useState('');
   const [printNotice, setPrintNotice] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -140,6 +141,27 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
       window.removeEventListener(STOCK_CHANGED_EVENT, handleStockChanged);
     };
   }, [currentUserId, catalogRetry]);
+
+  useEffect(() => {
+    if (getBackend() !== 'api') {
+      setSaleDraftToken(null);
+      return;
+    }
+    let active = true;
+    void getSaleDraftToken()
+      .then((token) => {
+        if (active) setSaleDraftToken(token);
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setSaleDraftToken(null);
+          setSaleError(error instanceof Error ? error.message : 'Unable to open a sale draft.');
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [currentUserId]);
 
   // Modals
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
@@ -588,6 +610,7 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
       });
     }
     const saleInput: PostSaleInput = {
+      ...(saleDraftToken ? { saleDraftToken } : {}),
       customerId: customer?.id ?? null,
       customerName: customer?.name ?? walkInName,
       items: saleItems,
@@ -610,6 +633,14 @@ export const POSBillingView: React.FC<POSBillingViewProps> = ({
         }
       }
       setCart([]);
+      setSaleDraftToken(null);
+      if (getBackend() === 'api') {
+        void getSaleDraftToken()
+          .then(setSaleDraftToken)
+          .catch((error: unknown) => {
+            setSaleError(error instanceof Error ? error.message : 'Unable to open the next sale draft.');
+          });
+      }
       setDiscount({ mode: 'percent', value: '' });
       setTenderedAmountPKR(0);
       setPrescriptions({});

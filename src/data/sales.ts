@@ -22,6 +22,7 @@ export interface PrescriptionDetails {
 }
 
 export interface PostSaleInput {
+  saleDraftToken?: string;
   customerId: string | null;
   customerName: string;
   items: Array<{
@@ -681,6 +682,7 @@ export async function postSale(input: PostSaleInput): Promise<CompletedSale> {
     const response = await apiRequest<unknown>('/api/sales', {
       method: 'POST',
       body: JSON.stringify({
+        ...(input.saleDraftToken ? { saleDraftToken: input.saleDraftToken } : {}),
         ...(input.customerId ? { customerId: input.customerId } : {}),
         customerName: input.customerName,
         items: input.items.map((item) => ({
@@ -716,6 +718,14 @@ export async function postSale(input: PostSaleInput): Promise<CompletedSale> {
     })),
   }, 'Could not complete the sale.', isCompletedSale);
   return raw;
+}
+
+export async function getSaleDraftToken(): Promise<string> {
+  const response = await apiRequest<unknown>('/api/sales/draft-token');
+  if (!isRecord(response) || !isString(response.saleDraftToken) || response.saleDraftToken.length > 512) {
+    throw new Error('The sale draft service returned an invalid response.');
+  }
+  return response.saleDraftToken;
 }
 
 export async function loadSalesHistory(limit = 100): Promise<CompletedSale[]> {

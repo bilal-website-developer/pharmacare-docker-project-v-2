@@ -3,6 +3,7 @@ import { getBackend } from './config';
 type ApiErrorBody = {
   error?: unknown;
   message?: unknown;
+  fields?: unknown;
 };
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -14,6 +15,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INSUFFICIENT_STOCK: 'There is not enough sellable stock to complete this action.',
   INVALID_CREDENTIALS: 'Invalid sign-in details.',
   INVALID_CURRENT_PASSWORD: 'The current password is incorrect.',
+  LICENCE_UNAVAILABLE: 'Licence status could not be verified. Contact the shop administrator.',
   NOT_FOUND: 'The requested record could not be found.',
   PAYMENTS_MUST_EQUAL_TOTAL: 'Payment amounts must match the bill total.',
   PRESCRIPTION_REQUIRED: 'Prescription details are required for this medicine.',
@@ -45,7 +47,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   SETUP_UNAVAILABLE: 'First-run setup is not enabled on this installation.',
   STOCK_PERMISSION_REQUIRED: 'Stock Inventory permission is required for restocking.',
   UNAUTHENTICATED: 'Your session has expired. Sign in again.',
-  VALIDATION_FAILED: 'Some submitted information is invalid. Check it and try again.',
+  VALIDATION_FAILED: 'Correct the fields marked in the form.',
 };
 
 export class ApiError extends Error {
@@ -53,6 +55,7 @@ export class ApiError extends Error {
     readonly code: string,
     readonly status: number,
     message = ERROR_MESSAGES[code] ?? 'The request could not be completed.',
+    readonly fieldErrors: Readonly<Record<string, string>> = {},
   ) {
     super(message);
     this.name = 'ApiError';
@@ -94,7 +97,16 @@ function apiError(response: Response, payload: unknown): ApiError {
   const body = isRecord(payload) ? payload as ApiErrorBody : {};
   const code = typeof body.error === 'string' ? body.error : 'REQUEST_FAILED';
   const safeMessage = ERROR_MESSAGES[code];
-  return new ApiError(code, response.status, safeMessage);
+  const fieldErrors: Record<string, string> = {};
+  if (isRecord(body.fields)) {
+    for (const [field, value] of Object.entries(body.fields)) {
+      if (typeof value === 'string') fieldErrors[field] = value;
+    }
+  }
+  const message = code === 'VALIDATION_FAILED' && Object.keys(fieldErrors).length > 0
+    ? `Check: ${Object.keys(fieldErrors).join(', ')}.`
+    : safeMessage;
+  return new ApiError(code, response.status, message, fieldErrors);
 }
 
 async function send(

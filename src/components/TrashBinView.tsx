@@ -32,7 +32,7 @@ const ACTION_LABELS: Record<TrashBinEvent['action'], string> = {
   restored: 'Restored',
 };
 
-export function TrashBinView({ currentRole }: { currentRole: UserRole }) {
+export function TrashBinView() {
   const [events, setEvents] = useState<TrashBinEvent[]>([]);
   const [filter, setFilter] = useState<TrashFilter>('all');
   const [loading, setLoading] = useState(true);
@@ -184,9 +184,7 @@ export function TrashBinView({ currentRole }: { currentRole: UserRole }) {
               <tr><td colSpan={7} className="px-4 py-10 text-center text-muted">No matching Trash Bin activity.</td></tr>
             ) : visibleEvents.map((event) => {
               const protectedUser = event.entity_type === 'profile'
-                && (currentRole === UserRole.SUPER_ADMIN
-                  ? event.entity_role === UserRole.SUPER_ADMIN
-                  : event.entity_role === UserRole.ADMIN || event.entity_role === UserRole.SUPER_ADMIN);
+                && event.entity_role === UserRole.ADMIN;
               const canRestore = event.can_restore && !protectedUser;
               return (
                 <tr key={event.id}>

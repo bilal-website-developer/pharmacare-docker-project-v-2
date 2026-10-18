@@ -76,7 +76,6 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<UserRole, readonly ModuleKey[]> = 
     'customers', 'suppliers', 'sales_history', 'purchase_history', 'expenses', 'reports',
   ],
   [UserRole.ADMIN]: MODULES.map(({ key }) => key),
-  [UserRole.SUPER_ADMIN]: MODULES.map(({ key }) => key),
 };
 
 const PAGE_MODULE: Partial<Record<string, ModuleKey>> = {
@@ -109,7 +108,7 @@ export function permissionsForRole(role: UserRole, permissions: readonly string[
 }
 
 export function isAdminRole(role: UserRole) {
-  return role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN;
+  return role === UserRole.ADMIN;
 }
 
 export function canAccessModule(role: UserRole, permissions: readonly string[], moduleKey: ModuleKey) {
@@ -118,6 +117,7 @@ export function canAccessModule(role: UserRole, permissions: readonly string[], 
 
 export function canAccessPage(role: UserRole, permissions: readonly string[], pageKey: string) {
   if (pageKey === 'dashboard' || pageKey === 'help-support') return true;
+  if (pageKey === 'allow-support') return isAdminRole(role);
   if (pageKey === 'my-print-requests') return true;
   if (pageKey === 'print-requests') return isAdminRole(role);
   if (pageKey === 'settings' || pageKey === 'trash-bin') return isAdminRole(role);

@@ -22,6 +22,7 @@ import { DashboardView } from './components/DashboardView';
 import { LoginView } from './components/LoginView';
 import { BackendUnavailableView } from './components/BackendUnavailableView';
 import { FirstRunSetupView } from './components/FirstRunSetupView';
+import { LicenceBanners } from './components/LicenceBanners';
 import type { ProductFilter } from './components/InventoryScreen';
 import { AuthSession, refreshAuthSession, restoreAuthSession, signOut } from './utils/auth';
 import { getBackend, isUnauthenticatedApiError } from './api';
@@ -68,6 +69,7 @@ const SuppliersView = lazy(() => import('./components/SuppliersView').then(({ Su
 const StockPurchaseView = lazy(() => import('./components/StockPurchaseView').then(({ StockPurchaseView: View }) => ({ default: View })));
 const PurchaseHistoryView = lazy(() => import('./components/PurchaseHistoryView').then(({ PurchaseHistoryView: View }) => ({ default: View })));
 const HelpSupportView = lazy(() => import('./components/HelpSupportView').then(({ HelpSupportView: View }) => ({ default: View })));
+const AllowSupportView = lazy(() => import('./components/AllowSupportView').then(({ AllowSupportView: View }) => ({ default: View })));
 const TrashBinView = lazy(() => import('./components/TrashBinView').then(({ TrashBinView: View }) => ({ default: View })));
 const ManageUsersView = lazy(() => import('./components/ManageUsersView').then(({ ManageUsersView: View }) => ({ default: View })));
 const ChangePasswordModal = lazy(() => import('./components/ManageUsersView').then(({ ChangePasswordModal: View }) => ({ default: View })));
@@ -97,6 +99,7 @@ const NAV_PATHS: Record<NavItemKey, string> = {
   settings: '/settings',
   'trash-bin': '/trash-bin',
   'help-support': '/help',
+  'allow-support': '/support',
 };
 
 function routeToNavItem(pathname: string): NavItemKey | null {
@@ -244,7 +247,7 @@ export default function App() {
 
   const handleSetupComplete = () => {
     setNeedsSetup(false);
-    setAuthMessage('Setup complete. Sign in with your new Super Admin account.');
+    setAuthMessage('Setup complete. Sign in with your new admin account.');
     window.history.replaceState({}, '', '/login');
   };
 
@@ -316,6 +319,12 @@ function PharmacyWorkspace({
   authMessage: string;
 }) {
   const { canPage } = usePermissions();
+  const canOpenPage = React.useCallback(
+    (pageKey: string) => pageKey === 'allow-support'
+      ? getBackend() === 'api' && canPage(pageKey)
+      : canPage(pageKey),
+    [canPage],
+  );
   const initialPath = window.location.pathname;
   const [activeItem, setActiveItem] = useState<NavItemKey>(
     routeToNavItem(initialPath) ?? 'dashboard'
@@ -332,7 +341,7 @@ function PharmacyWorkspace({
   const currentUserName = session.displayName;
   const canEditShopSettings = isAdminRole(currentRole)
     && (getBackend() !== 'api' || session.permissions.includes('manage_users'));
-  const canEditShopIdentity = getBackend() !== 'api' || currentRole === 'super_admin';
+  const canEditShopIdentity = getBackend() !== 'api' || currentRole === 'admin';
   const handlePrintReceipt: PrintReceiptHandler = React.useCallback(
     async (type, payload, options) => {
       const { printReceipt } = await import('./utils/printWorkflow');
@@ -472,7 +481,7 @@ function PharmacyWorkspace({
         return;
       }
       setIsPageNotFound(false);
-      if (!canPage(requested)) {
+      if (!canOpenPage(requested)) {
         setAccessMessage('No access. Your account does not have permission to open that page.');
         setActiveItem('dashboard');
         window.history.replaceState({}, '', '/');
@@ -484,10 +493,10 @@ function PharmacyWorkspace({
     syncRoute();
     window.addEventListener('popstate', syncRoute);
     return () => window.removeEventListener('popstate', syncRoute);
-  }, [canPage]);
+  }, [canOpenPage]);
 
   const navigateTo = React.useCallback((item: NavItemKey) => {
-    if (!canPage(item)) {
+    if (!canOpenPage(item)) {
       setAccessMessage('No access. Your account does not have permission to open that page.');
       setActiveItem('dashboard');
       window.history.replaceState({}, '', '/');
@@ -497,7 +506,7 @@ function PharmacyWorkspace({
     setIsPageNotFound(false);
     setActiveItem(item);
     window.history.pushState({}, '', NAV_PATHS[item]);
-  }, [canPage]);
+  }, [canOpenPage]);
 
   const [productFilter, setProductFilter] = React.useState<ProductFilter>(null);
   const [stockMedicineId, setStockMedicineId] = React.useState<string | null>(null);
@@ -680,14 +689,14 @@ function PharmacyWorkspace({
   const updateMemoSettings = async (settings: PharmacyMemoSettings): Promise<boolean> => {
     if (getBackend() === 'api') {
       const editableSettings: Partial<PharmacyMemoSettings> = { ...settings };
-      if (currentRole !== 'super_admin') {
+      if (currentRole !== 'admin') {
         delete editableSettings.storeName;
         delete editableSettings.address;
         delete editableSettings.phone;
       }
       try {
         const result = await updateShopSettings({
-          memoSettings: currentRole === 'super_admin'
+          memoSettings: currentRole === 'admin'
             ? settings
             : editableSettings,
         });
@@ -938,6 +947,8 @@ function PharmacyWorkspace({
         return 'TRASH BIN';
       case 'help-support':
         return 'HELP & SUPPORT';
+      case 'allow-support':
+        return 'ALLOW SUPPORT';
       default:
         return 'DEMO STORE';
     }
@@ -973,6 +984,7 @@ function PharmacyWorkspace({
 
         {/* Dynamic Screen View */}
         <main className="pharmacy-page p-4 sm:p-6 flex-1 overflow-y-auto">
+          <LicenceBanners />
           {accessMessage && <p role="status" className="visual-toast mb-4 rounded-control border border-warning bg-warning/15 px-4 py-3 text-sm font-semibold text-text">{accessMessage}</p>}
           {isPageNotFound ? (
             <section className="mx-auto flex min-h-[50vh] max-w-xl flex-col items-center justify-center gap-4 text-center">
@@ -986,7 +998,7 @@ function PharmacyWorkspace({
                 Back to Dashboard
               </button>
             </section>
-          ) : !canPage(activeItem) ? (
+          ) : !canOpenPage(activeItem) ? (
             <p role="alert" className="rounded-control border border-warning bg-warning/15 px-4 py-3 text-sm font-semibold text-text">No access. Redirecting to Dashboard.</p>
           ) : (
           <ScreenLoadBoundary key={activeItem}>
@@ -1155,8 +1167,9 @@ function PharmacyWorkspace({
           {activeItem === 'purchase-history' && <PurchaseHistoryView currentRole={currentRole} />}
 
           {activeItem === 'help-support' && <HelpSupportView username={currentUserName} role={currentRole} />}
+          {activeItem === 'allow-support' && <AllowSupportView />}
 
-          {activeItem === 'trash-bin' && <TrashBinView currentRole={currentRole} />}
+          {activeItem === 'trash-bin' && <TrashBinView />}
 
           {activeItem === 'manage-users' && <ManageUsersView currentUserId={session.userId} currentRole={currentRole} onChangePassword={() => setShowPasswordDialog(true)} />}
           {activeItem === 'my-print-requests' && <MyPrintRequestsView userId={session.userId} />}

@@ -55,7 +55,7 @@ test('only POS users with the kind-specific key can print directly; admins alway
   assert.equal(canPrintReceipt(UserRole.CASHIER, ['pos', 'pos_print_sale'], 'payment'), false);
   assert.equal(canPrintReceipt(UserRole.MANAGER, ['pos_print_payment'], 'payment'), false);
   assert.equal(canPrintReceipt(UserRole.ADMIN, [], 'payment'), true);
-  assert.equal(canPrintReceipt(UserRole.SUPER_ADMIN, [], 'sale'), true);
+  assert.equal(canPrintReceipt(UserRole.ADMIN, [], 'sale'), true);
 });
 
 test('snapshot parser rejects malformed data rather than returning a success-shaped fallback', () => {

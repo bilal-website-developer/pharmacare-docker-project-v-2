@@ -2,9 +2,10 @@ import React from 'react';
 import {
   BarChart3, BellRing, ChevronLeft, ChevronRight, FileText, HelpCircle, History,
   Layers, LayoutDashboard, MessageSquare, Package, Printer, Receipt, Settings,
-  ShoppingBag, ShoppingCart, Trash2, Truck, UserCheck, Wallet,
+  ShoppingBag, ShoppingCart, ShieldCheck, Trash2, Truck, UserCheck, Wallet,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { getBackend } from '../api';
 import { ModuleKey, usePermissions } from '../permissions';
 import PharmaLogo from './PharmaLogo';
 import GlowCredit from './GlowCredit';
@@ -13,7 +14,8 @@ export type NavItemKey =
   | 'dashboard' | 'pos' | 'products' | 'master-data' | 'stock-inventory'
   | 'customers' | 'customer-ledger' | 'whatsapp-reminders' | 'sales-history'
   | 'suppliers' | 'purchases' | 'purchase-history' | 'expenses' | 'reports'
-  | 'manage-users' | 'my-print-requests' | 'print-requests' | 'settings' | 'trash-bin' | 'help-support';
+  | 'manage-users' | 'my-print-requests' | 'print-requests' | 'settings' | 'trash-bin'
+  | 'help-support' | 'allow-support';
 
 interface SidebarProps {
   activeItem: NavItemKey;
@@ -29,6 +31,7 @@ interface NavEntry {
   icon: LucideIcon;
   module?: ModuleKey;
   admin?: boolean;
+  apiOnly?: boolean;
 }
 
 const GROUPS: Array<{ title: string; items: NavEntry[] }> = [
@@ -61,6 +64,7 @@ const GROUPS: Array<{ title: string; items: NavEntry[] }> = [
   { title: 'Settings & System', items: [
     { key: 'settings', label: 'Settings', icon: Settings, admin: true },
     { key: 'trash-bin', label: 'Trash Bin', icon: Trash2, admin: true },
+    { key: 'allow-support', label: 'Allow support', icon: ShieldCheck, admin: true, apiOnly: true },
     { key: 'help-support', label: 'Help & Support', icon: HelpCircle },
   ] },
 ];
@@ -96,7 +100,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <nav aria-label="Main navigation" className="min-h-0 flex-1 space-y-5 overflow-y-auto px-3 py-4 text-xs">
         {GROUPS.map(({ title, items }) => {
           const visibleItems = items.filter((item) =>
-            item.admin ? isAdmin : item.module ? can(item.module) : true
+            (!item.apiOnly || getBackend() === 'api')
+            && (item.admin ? isAdmin : item.module ? can(item.module) : true)
           );
           if (visibleItems.length === 0) return null;
           return (

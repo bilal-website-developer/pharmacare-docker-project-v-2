@@ -1,6 +1,5 @@
 export enum UserRole {
   ADMIN = 'admin',
-  SUPER_ADMIN = 'super_admin',
   MANAGER = 'manager',
   CASHIER = 'cashier',
   ACCOUNTANT = 'accountant',
@@ -8,7 +7,6 @@ export enum UserRole {
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   [UserRole.ADMIN]: 'Admin',
-  [UserRole.SUPER_ADMIN]: 'Super Admin',
   [UserRole.MANAGER]: 'Manager',
   [UserRole.CASHIER]: 'Cashier',
   [UserRole.ACCOUNTANT]: 'Accountant',
@@ -16,7 +14,6 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 
 export const ROLE_MAX_DISCOUNT: Record<UserRole, number> = {
   [UserRole.ADMIN]: 30,
-  [UserRole.SUPER_ADMIN]: 30,
   [UserRole.MANAGER]: 15,
   [UserRole.CASHIER]: 10,
   [UserRole.ACCOUNTANT]: 0,

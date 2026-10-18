@@ -13,7 +13,7 @@ import {
   ROLE_DEFAULT_PERMISSIONS,
 } from './permissions';
 
-test('role defaults preserve limited roles and give both admin roles full module access', () => {
+test('role defaults preserve limited roles and give admin full module access', () => {
   assert.equal(isPermissionKey('stock_alerts'), true);
   assert.deepEqual(ROLE_DEFAULT_PERMISSIONS[UserRole.CASHIER], ['pos', 'customers']);
   assert.deepEqual(ROLE_DEFAULT_PERMISSIONS[UserRole.MANAGER], [
@@ -24,7 +24,6 @@ test('role defaults preserve limited roles and give both admin roles full module
     'customers', 'suppliers', 'sales_history', 'purchase_history', 'expenses', 'reports',
   ]);
   assert.deepEqual(ROLE_DEFAULT_PERMISSIONS[UserRole.ADMIN], MODULES.map(({ key }) => key));
-  assert.deepEqual(ROLE_DEFAULT_PERMISSIONS[UserRole.SUPER_ADMIN], MODULES.map(({ key }) => key));
 });
 
 test('POS print toggles are visible only with POS Billing and default new POS users to sale-only printing', () => {
@@ -41,17 +40,17 @@ test('POS print toggles are visible only with POS Billing and default new POS us
   assert.deepEqual(normalizePermissionSelection(['customers', 'pos_print_sale', 'pos_print_payment']), ['customers']);
 });
 
-test('admin roles override assigned permissions while limited roles remain permission-scoped', () => {
+test('admin overrides assigned permissions while limited roles remain permission-scoped', () => {
   for (const { key } of MODULES) {
     assert.equal(canAccessModule(UserRole.ADMIN, [], key), true);
     assert.equal(canAccessModule(UserRole.ADMIN, ['pos'], key), true);
-    assert.equal(canAccessModule(UserRole.SUPER_ADMIN, [], key), true);
+    assert.equal(canAccessModule(UserRole.ADMIN, [], key), true);
   }
   assert.equal(canAccessModule(UserRole.CASHIER, ['pos'], 'pos'), true);
   assert.equal(canAccessModule(UserRole.CASHIER, ['pos'], 'purchases'), false);
   assert.equal(canAccessPage(UserRole.ADMIN, [], 'manage-users'), true);
-  assert.equal(canAccessPage(UserRole.SUPER_ADMIN, [], 'manage-users'), true);
-  assert.equal(canAccessPage(UserRole.SUPER_ADMIN, [], 'settings'), true);
+  assert.equal(canAccessPage(UserRole.ADMIN, [], 'manage-users'), true);
+  assert.equal(canAccessPage(UserRole.ADMIN, [], 'settings'), true);
   assert.equal(canAccessPage(UserRole.ADMIN, [], 'expenses'), true);
   assert.equal(canAccessPage(UserRole.ADMIN, ['expenses'], 'expenses'), true);
   assert.equal(canAccessPage(UserRole.ADMIN, [], 'manage-users'), true);
@@ -71,4 +70,7 @@ test('admin roles override assigned permissions while limited roles remain permi
   assert.equal(canAccessPage(UserRole.CASHIER, ['customers'], 'customer-ledger'), true);
   assert.equal(canAccessPage(UserRole.CASHIER, [], 'dashboard'), true);
   assert.equal(canAccessPage(UserRole.CASHIER, [], 'help-support'), true);
+  assert.equal(canAccessPage(UserRole.ADMIN, [], 'allow-support'), true);
+  assert.equal(canAccessPage(UserRole.MANAGER, [], 'allow-support'), false);
+  assert.equal(canAccessPage(UserRole.CASHIER, [], 'allow-support'), false);
 });
