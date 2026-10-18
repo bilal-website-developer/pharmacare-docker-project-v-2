@@ -17,7 +17,7 @@ database.
    approved first-run setup flow. Do not put credentials in screenshots or
    test notes.
 4. In this isolated development setup only, set `DEMO_MODE=true` and
-   `NODE_ENV=development`, build the server image and run
+   `DEMO_NODE_ENV=development` in the demo environment, build the server image and run
    `npm.cmd run seed:demo`. Confirm the output reports synthetic record counts;
    rerun once and confirm it reports no second insertion. The fixtures contain
    no stock batches: use the purchase workflow below to create saleable stock.

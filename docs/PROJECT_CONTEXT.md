@@ -122,7 +122,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - 2026-10-17 — Added a 20-entry fictional starter catalog and Super Admin-only transactional/idempotent importer; new entries are inactive, zero-priced, and have no stock. Current root tests: 272 total (259 passed, 0 failed, 13 skipped); focused catalog tests 2/2; security 9/9; Compose Mongo 13/13; lint/build passed; runtime image contains all 20 entries. Production and shop-PC use remain unverified.
 - 2026-10-17 — Added a loopback-only single-PC installer with isolated Compose project naming and expiring one-time setup code provisioning. PowerShell parser, Compose config, root tests (272 total; 259 passed, 0 failed, 13 skipped), lint/build, and Compose Mongo (13/13) passed. The installer has not been run against an actual shop; LAN HTTPS/production remains unverified.
 - 2026-10-18 — Added scheduled gzip Mongo backups with a database-read-only identity, age retention, and a tmpfs-only scratch restore/count comparison. Compose replica-set rehearsal restored the app database and matched collection counts (including 39 customer documents); lint/build and root tests passed (272 total: 259 passed, 0 failed, 13 skipped), Compose Mongo tests 13/13, and production Compose syntax validation passed. Caddy/TLS deployment, DNS/firewall, off-host backups, and owner acceptance remain unverified.
-- 2026-10-18 — Added a demo-only transactional seed with development/test, explicit flag, and demo-database guards plus a five-role, module-by-module manual acceptance plan. Automated seed tests and full validation results are recorded in the migration tracker; no human browser acceptance or production use was performed.
+- 2026-10-18 — Added a demo-only transactional seed with development/test, explicit flag, and demo-database guards plus a five-role, module-by-module manual acceptance plan. The Compose runner uses `DEMO_NODE_ENV` and defaults to production; automated seed tests and full validation results are recorded in the migration tracker; no human browser acceptance or production use was performed.
 - 2026-10-17 — Phase 7 completion audit added admin-only, `manage_users`-gated `/api/audit-logs`; Mongo integration test confirms a manager is denied even with that explicit key, admin effective permissions are honored, shop isolation holds, and raw before/after fields are omitted. Root tests then: 264 total (253 passed, 0 failed, 11 skipped); lint/build passed; Compose Mongo 11/11.
 - 2026-10-17 — Autopilot baseline re-run: lint/build passed, root tests 264 total (253 passed, 0 failed, 11 skipped), API security 9/9, Compose Mongo integration 11/11; added shell/PowerShell line-ending rules. Worktree was clean before this documentation batch; manual and production acceptance remain open.
 - 2026-10-17 — Phase 9 local hardening checks: strict-origin CORS, rate limits, generic errors, redaction, security headers, route/cashier sweeps, and audits; root tests 264 total (253 passed, 0 failed, 11 skipped), Compose Mongo 11/11, audits 0 vulnerabilities. Production acceptance and penetration testing remain open.
@@ -146,15 +146,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-18T09:38:25.356Z
+Generated at (UTC): 2026-10-18T09:38:57.402Z
 Git branch: feature/mongo-migration
 
 Last 5 commit subjects:
+- feat: add guarded demo seed and manual acceptance plan
 - feat: add Mongo backup and production deployment config
 - feat: add local shop installer
 - docs: record catalog verification status
 - feat: add safe starter catalog import
-- feat: add first-run pharmacy setup
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 
