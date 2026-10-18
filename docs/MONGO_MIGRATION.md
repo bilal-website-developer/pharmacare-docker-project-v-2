@@ -367,13 +367,14 @@ Implemented route paths include `/api/returns/policy`, `/api/returns/sales/:invo
 
 ## Single-PC shop installer
 
-**Status: WRITTEN-UNVERIFIED for an actual shop installation.** `docker/install-shop.ps1` generates per-install Mongo/auth secrets, a unique Compose project name, and a random setup code; it writes the code hash/expiry (not plaintext) to the ignored `.env`, validates Compose, builds/starts services, and checks the API/setup status. Compose now binds the development/single-PC web UI to loopback; MongoDB and the API remain unpublished. This gives each extracted installation directory a separate Compose-scoped Mongo volume.
+**Status: exercised in a throwaway clean clone; initial run exposed a shop-slug bug, correction is committed, pristine rerun pending.** `docker/install-shop.ps1` generates per-install Mongo/auth secrets, a unique Compose project name, and a random setup code; it writes the code hash/expiry (not plaintext) to the ignored `.env`, validates Compose, builds/starts services, and checks the API/setup status. Compose binds the development/single-PC web UI to loopback; MongoDB and the API remain unpublished. This gives each extracted installation directory a separate Compose-scoped Mongo volume.
 
 - `[System.Management.Automation.Language.Parser]::ParseFile(...)` reported `PowerShell syntax parse passed`.
 - `docker compose config --quiet` exited 0.
 - Installer-step regression checks: `npm.cmd test` reported 272 total tests (259 passed, 0 failed, 13 skipped), `docker compose run --build --rm --no-deps api-test` reported 13 passed/0 failed/0 skipped, `npm.cmd run lint` exited 0, and `npm.cmd run build` exited 0.
-- No shop `.env` or volume was created, no actual installation was run, and no setup code was generated during validation.
-- Open: manual shop-PC run, LAN HTTPS/reverse proxy, production Compose/certificate flow, and update/uninstall tools. The current installer is local-only and does not configure Windows firewall or expose the app to LAN clients.
+- The first isolated install completed stack startup and first-run setup. It exposed that Compose did not pass `BOOTSTRAP_SHOP_SLUG` to the API: `-ShopSlug shoptest` created a `main` shop, so login using `shoptest` failed while `main` succeeded. Added the missing environment mapping to `api` and `api-test`, and asserted in the Mongo setup integration case that the persisted slug equals the configured slug. Root test run: 278 total, 265 passed, 0 failed, 13 skipped; lint/build passed; Compose Mongo suite passed 13/13. Compose profile inspection confirmed the chosen slug reaches both services. A clean installation after this fix remains pending.
+- The successful test installer code and random test password are stored only in `E:\TEST_CREDENTIALS.local.txt`; values were not printed. Two incomplete test stacks were stopped without deleting their named volumes. The source clone was local because HTTPS remote authentication is unavailable.
+- Open: pristine installation rerun, manual shop-PC run, LAN HTTPS/reverse proxy, production Compose/certificate flow, and update/uninstall tools. The current installer is local-only and does not configure Windows firewall or expose the app to LAN clients.
 
 ## Autopilot step 6 — backup/restore and production deployment
 

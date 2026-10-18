@@ -1140,6 +1140,7 @@ test('Mongo first-run setup is one-time, password-protected, and concurrent-safe
     assert.equal(await database.collection(collections.users).countDocuments({ role: 'super_admin' }), 1);
     const createdShop = await database.collection(collections.shops).findOne({});
     const createdUser = await database.collection(collections.users).findOne({});
+    assert.equal(createdShop.slug, setupConfig.bootstrapShopSlug);
     assert.equal(createdShop.timeZone, 'Asia/Karachi');
     assert.equal(createdShop.memoSettings.roundNet, 'none');
     assert.match(createdUser.passwordHash, /^\$argon2id\$/);

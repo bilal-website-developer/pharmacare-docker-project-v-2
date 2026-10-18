@@ -2,7 +2,7 @@
 
 ## Current position
 
-> Current position: Step 1 checks passed locally on 2026-10-18, but the authorized push is blocked by missing noninteractive HTTPS credentials. Step 2 test directory `E:\ShopTest` was created as a local clone of the committed branch because remote cloning requires the same unavailable credentials; it has no `.env` or data directory. The original development Compose stack was stopped (not removed) to free port 8080. Next: run and inspect the installer in the test clone without exposing its one-time code.
+> Current position: Step 2 clean-install testing found and fixed that Compose omitted `BOOTSTRAP_SHOP_SLUG` from the API environment, so `install-shop.ps1 -ShopSlug shoptest` created a shop under `main` and the documented login slug failed. Added the API/test-runner mapping and an integration assertion that setup honors the configured slug. Root lint/build passed; root tests 278 total (265 passed, 0 failed, 13 skipped); real Mongo integration 13/13; Compose config showed the test slug reaches both profiles. Next: commit this fix, then rerun a pristine installer test. The authorized push remains blocked by noninteractive HTTPS authentication.
 
 - Branch: `feature/mongo-migration`.
 - Recent commits: `e7dce1e` housekeeping, `9d3f0bb` admin audit-log endpoint, `d661142` API-unavailable retry screen, `029ee9e` first-run setup, `67c68d9` starter catalog.
@@ -13,6 +13,8 @@
 - Tracked worktree was clean at step start. `.env` remains ignored. No `.env` values were displayed, no existing Mongo data volume was deleted/reset, and no Supabase data/schema or public service was changed.
 - `git push origin feature/mongo-migration` failed with `Cannot prompt because user interactivity has been disabled` / `unable to get password`; authentication is owner-pending.
 - Stopped (did not remove) the original Compose stack and created `E:\ShopTest` from the local committed branch. This clean source clone is not an authenticated clone of `origin`; it contains no `.env` and no Mongo data directory. The local-clone substitution was necessary because remote credentials are unavailable.
+- The installer created an isolated test shop, and its first-run setup completed. Login using the requested slug `shoptest` failed, while login using persisted slug `main` succeeded as `super_admin`. Read-only container inspection confirmed `BOOTSTRAP_SHOP_SLUG` was missing from the API environment. Added that environment mapping to both `api` and `api-test`, and added an integration assertion that the created shop slug equals `bootstrapShopSlug`. Focused Compose-config check reports slug propagation for both profiles.
+- Installer retries in `E:\ShopTest` and `E:\ShopTest2` were stopped without deleting their containers or volumes. The successful setup credentials are test-only and stored at `E:\TEST_CREDENTIALS.local.txt`; no values were displayed.
 
 ## Current verification evidence
 
@@ -40,7 +42,7 @@ The root test runner intentionally skips real-Mongo cases, which are exercised b
 ## Open risks and next work
 
 - The setup wizard requires installer-provisioned `SETUP_CODE_HASH` and `SETUP_CODE_EXPIRES_AT`; the current script sets them and displays the one-time code, but the real installation workflow remains unrun.
-- The clean-clone installer test is in progress; no test-shop volume has been deleted. Production Compose/TLS has only been parsed and Caddyfile validated; DNS, firewall, certificate issuance, real host deployment, off-host archive copy, and disaster-recovery targets remain untested. Demo seed has not been run against an isolated demo database; the human role plan is pending. Phase 12 checklist is preparatory only; no cut-over execution is approved or performed.
+- A fresh clean-install rerun after the slug fix is pending; no test-shop volume has been deleted. Production Compose/TLS has only been parsed and Caddyfile validated; DNS, firewall, certificate issuance, real host deployment, off-host archive copy, and disaster-recovery targets remain untested. Demo seed has not been run against an isolated demo database; the human role plan is pending. Phase 12 checklist is preparatory only; no cut-over execution is approved or performed.
 - Manual browser, LAN, printer/scanner, production, independent security, and legal acceptance remain owner-pending. Do not claim these are verified.
 
 ## Decisions
