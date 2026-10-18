@@ -2,7 +2,7 @@
 
 ## Current position
 
-> Current position: Step 2 clean-install verification passed in a pristine local clone after fixing Compose to pass `BOOTSTRAP_SHOP_SLUG` to API/test-runner; Mongo integration now asserts configured shop slug. Installer exited 0, API/Mongo/web were healthy, setup/login/refresh succeeded, and cookie flags were HttpOnly/Secure/SameSite=Strict. Root lint/build passed; root tests 278 total (265 passed, 0 failed, 13 skipped); Compose Mongo integration 13/13. Next: Step 3 browser automation and Step 4 shipping gaps. Remote push/clone remains owner-pending because HTTPS credentials cannot prompt.
+> Current position: Fresh isolated installer run passed setup/login/refresh checks after fixing Compose `BOOTSTRAP_SHOP_SLUG` wiring. Current validation: lint/build passed; `npm.cmd test` 278 total (265 passed, 0 failed, 13 skipped); API security 9/9; real-Mongo Compose integration 13/13. Browser smoke displayed the Pharma Care login screen, but authenticated browser walkthrough is not complete: the browser-control tool could not select its page, and private test credentials were not placed in tool arguments. Production, real shop-PC, and human acceptance remain owner-pending; remote push remains blocked on HTTPS authentication.
 
 - Branch: `feature/mongo-migration`.
 - Recent commits: `e7dce1e` housekeeping, `9d3f0bb` admin audit-log endpoint, `d661142` API-unavailable retry screen, `029ee9e` first-run setup, `67c68d9` starter catalog.
@@ -17,6 +17,7 @@
 - Installer retries in `E:\ShopTest` and `E:\ShopTest2` were stopped without deleting their containers or volumes. The successful setup credentials are test-only and stored at `E:\TEST_CREDENTIALS.local.txt`; no values were displayed.
 - After commit `deec3c6`, cloned into `E:\ShopTest2\retry` with no `.env`, reran `.\docker\install-shop.ps1 -ShopSlug shoptest`, and captured the new test-only code/password outside the repository without displaying them. Installer exited 0. `docker compose ps -a` showed Mongo healthy, mongo-init Exited (0), API healthy, and web healthy. `docker compose port web 80` returned `127.0.0.1:8080`; Mongo inspect showed `{"27017/tcp":null}`; health returned status/database `ok`.
 - Clean install API checks: `/api/setup/status` initially `needsSetup=true`; first setup HTTP 201; after setup `needsSetup=false`; second setup HTTP 409; wrong setup code HTTP 403; login using `shoptest` HTTP 200; refresh HTTP 200; `/api/auth/me` HTTP 200 as `super_admin`; refresh cookie had HttpOnly, Secure, and SameSite=Strict.
+- Browser UI smoke: `http://localhost:8080` loaded the Pharma Care sign-in view with email/password inputs and sign-in button. Authenticated screen automation did not run because browser page selection failed; credentials were not passed to browser tool calls. This is not manual acceptance.
 
 ## Current verification evidence
 
@@ -43,8 +44,7 @@ The root test runner intentionally skips real-Mongo cases, which are exercised b
 
 ## Open risks and next work
 
-- The setup wizard requires installer-provisioned `SETUP_CODE_HASH` and `SETUP_CODE_EXPIRES_AT`; the current script sets them and displays the one-time code, but the real installation workflow remains unrun.
-- The successful pristine test install remains running in `E:\ShopTest2\retry`; credentials remain outside the repository at `E:\TEST_CREDENTIALS.local.txt`. Earlier incomplete test stacks are stopped and their named volumes retained. Production Compose/TLS has only been parsed and Caddyfile validated; DNS, firewall, certificate issuance, real host deployment, off-host archive copy, and disaster-recovery targets remain untested. Demo seed has not been run against an isolated demo database; the full human role plan is pending. Phase 12 checklist is preparatory only; no cut-over execution is approved or performed.
+- The successful pristine test install at `E:\ShopTest2\retry` was stopped after verification with `docker compose stop`; no containers or volumes were deleted. The external test-only credential file `E:\TEST_CREDENTIALS.local.txt` was removed by exact path. Earlier incomplete test stacks are stopped and their named volumes retained. Production Compose/TLS has only been parsed and Caddyfile validated; DNS, firewall, certificate issuance, real host deployment, off-host archive copy, and disaster-recovery targets remain untested. Demo seed has not been run against an isolated demo database; the full human role plan is pending. Phase 12 checklist is preparatory only; no cut-over execution is approved or performed.
 - Manual browser, LAN, printer/scanner, production, independent security, and legal acceptance remain owner-pending. Do not claim these are verified.
 
 ## Decisions

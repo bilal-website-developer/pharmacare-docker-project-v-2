@@ -8,7 +8,7 @@ configured HTTPS Git credential provider on the development machine, then ask
 the engineer to retry the explicitly approved push. Do not paste a password,
 personal access token, or credential-helper output into chat.
 
-The first-run setup API/wizard and a single-PC installer script are implemented. The script has only been syntax/Compose-configuration checked and has not yet been run as an actual shop installation; LAN and production use remain unverified. It provisions `SETUP_CODE_HASH` and `SETUP_CODE_EXPIRES_AT`, then displays the corresponding one-time plaintext code. Do not paste setup codes, passwords, `.env` contents, or tokens into chat.
+The first-run setup API/wizard and single-PC installer were exercised in an isolated, fresh local clone. The installer provisions `SETUP_CODE_HASH` and `SETUP_CODE_EXPIRES_AT`, then displays the corresponding one-time plaintext code. This is not acceptance on a real shop PC; LAN and production use remain unverified. Do not paste setup codes, passwords, `.env` contents, or tokens into chat.
 
 From a new extracted release directory, start the installer in PowerShell:
 
