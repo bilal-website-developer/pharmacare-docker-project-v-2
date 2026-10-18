@@ -13,7 +13,7 @@ export function normalizePolicyPermissions(permissions: readonly string[]): stri
 }
 
 export function canUseManageUsers(callerRole: Role, callerPermissions: readonly string[]): boolean {
-  return callerRole === 'admin' || callerRole === 'super_admin'
+  return callerRole === 'admin'
     || callerPermissions.includes('manage_users');
 }
 
@@ -22,17 +22,14 @@ const ROLE_LEVEL: Record<Role, number> = {
   manager: 1,
   accountant: 1,
   admin: 2,
-  super_admin: 3,
 };
 
 export function assignableRolesFor(callerRole: Role, callerPermissions: readonly string[] = []): Role[] {
-  return callerRole === 'super_admin'
+  return callerRole === 'admin'
     ? [...ROLES]
-    : callerRole === 'admin'
+    : callerPermissions.includes('manage_users')
       ? ['cashier', 'manager', 'accountant']
-      : callerPermissions.includes('manage_users')
-        ? ['cashier', 'manager', 'accountant']
-        : [];
+      : [];
 }
 
 export function canAssignRole(
@@ -48,7 +45,7 @@ export function grantablePermissionsFor(
   callerPermissions: readonly string[],
   permissionKeys: readonly string[],
 ): string[] {
-  if (callerRole === 'admin' || callerRole === 'super_admin') return [...permissionKeys];
+  if (callerRole === 'admin') return [...permissionKeys];
   if (!callerPermissions.includes('manage_users')) return [];
   return callerPermissions.filter((permission) => permission !== 'manage_users');
 }
@@ -59,10 +56,10 @@ export function permissionGrantDenial(
   requestedPermissions: readonly string[],
   currentPermissions: readonly string[] = [],
 ): string | null {
-  if (callerRole === 'admin' || callerRole === 'super_admin') return null;
+  if (callerRole === 'admin') return null;
   if (!callerPermissions.includes('manage_users')) return 'You do not have permission to manage users.';
   if (requestedPermissions.includes('manage_users') && !currentPermissions.includes('manage_users')) {
-    return 'Only admin or super_admin may grant Manage Users.';
+    return 'Only an admin may grant Manage Users.';
   }
   if (requestedPermissions.some((permission) =>
     !callerPermissions.includes(permission) && !currentPermissions.includes(permission),
@@ -81,8 +78,7 @@ export function canManageTarget(
   callerPermissions: readonly string[] = [],
 ): boolean {
   if (callerId === targetId) return true;
-  if (callerRole === 'super_admin') return true;
-  if (callerRole === 'admin') return ROLE_LEVEL[targetRole] < ROLE_LEVEL.admin;
+  if (callerRole === 'admin') return true;
   return callerPermissions.includes('manage_users')
     && ROLE_LEVEL[targetRole] < ROLE_LEVEL.admin
     && !targetPermissions.includes('manage_users');
@@ -100,8 +96,6 @@ interface ProfileChangePolicy {
   targetActive: boolean;
   nextActive?: boolean;
   activeAdminCount: number;
-  superAdminCount: number;
-  activeSuperAdminCount: number;
   callerPermissions?: readonly string[];
 }
 
@@ -158,18 +152,6 @@ export function profileChangeDenial(change: ProfileChangePolicy): string | null 
     return change.action === 'delete'
       ? 'Cannot delete the last active admin.'
       : 'Cannot demote or deactivate the last active admin.';
-  }
-  if (change.targetRole === 'super_admin') {
-    if (change.action === 'delete'
-      && (change.superAdminCount <= 1 || (change.targetActive && change.activeSuperAdminCount <= 1))) {
-      return 'Cannot delete the last super_admin.';
-    }
-    if (isDemoting && (change.superAdminCount <= 1 || (change.targetActive && change.activeSuperAdminCount <= 1))) {
-      return 'Cannot demote the last super_admin.';
-    }
-    if (isDeactivating && change.activeSuperAdminCount <= 1) {
-      return 'Cannot deactivate the last super_admin.';
-    }
   }
   return null;
 }

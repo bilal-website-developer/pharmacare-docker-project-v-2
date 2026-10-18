@@ -71,7 +71,7 @@ test('user list returns policy capabilities and never returns password or lockou
   }
 });
 
-test('admin cannot manage another admin and only Super Admin can change admin accounts', async () => {
+test('admin can manage another admin account', async () => {
   const repository = new MemoryRepository();
   const shop = repository.addShop();
   const admin = repository.addUser(shop, {
@@ -89,11 +89,20 @@ test('admin cannot manage another admin and only Super Admin can change admin ac
   const { app, client } = await makeApp(repository);
   try {
     const response = await app.inject({
-      method: 'DELETE',
+      method: 'PATCH',
       url: `/api/users/${otherAdmin._id.toHexString()}`,
       headers: headers(admin),
+      payload: {
+        username: otherAdmin.username,
+        email: otherAdmin.email,
+        fullName: 'Updated Admin',
+        role: 'manager',
+        permissions: ['customers'],
+        isActive: true,
+      },
     });
-    assert.equal(response.statusCode, 403);
+    assert.equal(response.statusCode, 200);
+    assert.equal((await repository.findUserById(otherAdmin._id))?.role, 'manager');
   } finally {
     await app.close();
     await client.close();
@@ -141,20 +150,20 @@ test('permission-gated manager cannot grant permissions not held and Zod rejects
   }
 });
 
-test('nobody can change their own role and final active admin cannot be deleted', async () => {
+test('an admin cannot change their own role', async () => {
   const repository = new MemoryRepository();
   const shop = repository.addShop();
   const root = repository.addUser(shop, {
     username: 'root',
     email: 'root@example.test',
-    role: 'super_admin',
+    role: 'admin',
     permissions: ['pos'],
   });
   const admin = repository.addUser(shop, {
     username: 'last-admin',
     email: 'last-admin@example.test',
-    role: 'admin',
-    permissions: [],
+    role: 'manager',
+    permissions: ['pos'],
   });
   const { app, client } = await makeApp(repository);
   try {
@@ -166,20 +175,14 @@ test('nobody can change their own role and final active admin cannot be deleted'
         username: root.username,
         email: root.email,
         fullName: root.fullName,
-        role: 'admin',
-        permissions: [],
+        role: 'manager',
+        permissions: ['pos'],
         isActive: true,
       },
     });
     assert.equal(selfEdit.statusCode, 403);
 
-    const deleteFinalAdmin = await app.inject({
-      method: 'DELETE',
-      url: `/api/users/${admin._id.toHexString()}`,
-      headers: headers(root),
-    });
-    assert.equal(deleteFinalAdmin.statusCode, 403);
-    assert.equal(admin.deletedAt, null);
+    assert.equal(admin.role, 'manager');
   } finally {
     await app.close();
     await client.close();

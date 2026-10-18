@@ -54,7 +54,7 @@ function validStoredRole(role: unknown): role is Role {
 }
 
 function storedPermissions(user: UserRecord): PermissionKey[] {
-  return user.role === 'super_admin'
+  return user.role === 'admin'
     ? [...MODULE_KEYS]
     : user.permissions.filter((permission) => PERMISSION_KEYS.includes(permission));
 }
@@ -146,7 +146,7 @@ export function registerUserRoutes(
     const caller = ensureManager(request, reply);
     if (!caller) return;
     const users = await repository.listUsers(caller.shopId, false);
-    const visibleUsers = users.filter((user) => caller.role === 'super_admin' || user.role !== 'super_admin');
+    const visibleUsers = users;
     const callerPermissions = caller.permissions.filter((permission) => PERMISSION_KEYS.includes(permission));
     return reply.send({
       users: visibleUsers
@@ -172,14 +172,13 @@ export function registerUserRoutes(
   app.get('/api/users/deleted', protectedRoute, async (request, reply) => {
     const caller = ensureManager(request, reply);
     if (!caller) return;
-    if (caller.role !== 'admin' && caller.role !== 'super_admin') {
+    if (caller.role !== 'admin') {
       return reply.code(403).send({ error: 'FORBIDDEN' });
     }
     const users = await repository.listUsers(caller.shopId, true);
     return reply.send({
       users: users
         .filter((user) => user.deletedAt !== null)
-        .filter((user) => caller.role === 'super_admin' || user.role !== 'super_admin')
         .sort((left, right) => (right.deletedAt?.getTime() ?? 0) - (left.deletedAt?.getTime() ?? 0))
         .filter((user) => validStoredRole(user.role))
         .map((user) => userDto(user, true)),
@@ -212,7 +211,7 @@ export function registerUserRoutes(
       fullName: input.fullName,
       role: input.role,
       isActive: input.isActive !== false,
-      permissions: input.role === 'super_admin' ? [...MODULE_KEYS] : permissions,
+      permissions: input.role === 'admin' ? [...MODULE_KEYS] : permissions,
       passwordHash: await hashPassword(input.password),
       failedLogins: 0,
       lockedUntil: null,
@@ -276,12 +275,10 @@ export function registerUserRoutes(
           targetRole: target.role,
           nextRole: input.role,
           targetPermissions: storedPermissions(target),
-          nextPermissions: input.role === 'super_admin' ? [...MODULE_KEYS] : nextPermissions,
+          nextPermissions: input.role === 'admin' ? [...MODULE_KEYS] : nextPermissions,
           targetActive: target.isActive,
           nextActive: input.isActive,
           activeAdminCount: await transaction.countRole('admin', true),
-          superAdminCount: await transaction.countRole('super_admin', false),
-          activeSuperAdminCount: await transaction.countRole('super_admin', true),
           callerPermissions,
         });
         if (denial) return { kind: 'policy_denied' as const, message: denial };
@@ -292,7 +289,7 @@ export function registerUserRoutes(
           emailNormalized: normalized(input.email),
           fullName: input.fullName,
           role: input.role,
-          permissions: input.role === 'super_admin' ? [...MODULE_KEYS] : nextPermissions,
+          permissions: input.role === 'admin' ? [...MODULE_KEYS] : nextPermissions,
           isActive: input.isActive,
           updatedAt: now,
         };
@@ -335,8 +332,6 @@ export function registerUserRoutes(
         targetPermissions: storedPermissions(target),
         targetActive: target.isActive,
         activeAdminCount: await transaction.countRole('admin', true),
-        superAdminCount: await transaction.countRole('super_admin', false),
-        activeSuperAdminCount: await transaction.countRole('super_admin', true),
         callerPermissions,
       });
       if (denial) return { kind: 'denied' as const, message: denial };
@@ -366,7 +361,7 @@ export function registerUserRoutes(
   app.post('/api/users/:id/restore', protectedRoute, async (request, reply) => {
     const caller = ensureManager(request, reply);
     if (!caller) return;
-    if (caller.role !== 'admin' && caller.role !== 'super_admin') {
+    if (caller.role !== 'admin') {
       return reply.code(403).send({ error: 'FORBIDDEN' });
     }
     const params = z.object({ id: idSchema }).strict().safeParse(request.params);

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const ROLES = ['cashier', 'manager', 'accountant', 'admin', 'super_admin'] as const;
+export const ROLES = ['cashier', 'manager', 'accountant', 'admin'] as const;
 export const MODULE_KEYS = [
   'pos',
   'products',
@@ -36,5 +36,5 @@ export function normalizePermissions(permissions: readonly PermissionKey[]): Per
 }
 
 export function effectivePermissions(role: Role, permissions: readonly PermissionKey[]): PermissionKey[] {
-  return role === 'admin' || role === 'super_admin' ? [...MODULE_KEYS] : [...permissions];
+  return role === 'admin' ? [...MODULE_KEYS] : [...permissions];
 }

@@ -17,6 +17,7 @@ const prescriptionSchema = z.object({
 }).strict();
 
 export const postSaleSchema = z.object({
+  saleDraftToken: z.string().max(512).optional(),
   customerId: idText.optional(),
   customerName: z.string().trim().max(200).optional().default(''),
   items: z.array(z.object({

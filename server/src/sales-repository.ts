@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Long, ObjectId, type ClientSession, type Db, type Document, type MongoClient } from 'mongodb';
 import type { AuditRecord, UserRecord } from './models.js';
 import type {
@@ -57,7 +58,6 @@ function roleDiscountPercent(role: UserRecord['role']): bigint {
     case 'cashier': return 10n;
     case 'manager': return 15n;
     case 'admin':
-    case 'super_admin': return 30n;
     case 'accountant': return 0n;
   }
 }
@@ -658,6 +658,24 @@ export class MongoSalesRepository implements SalesRepository {
             event: 'sale.discount_applied',
             after: { discountPaisa: requestedDiscount.toString() },
           }, { session });
+        }
+        if (input.saleDraftToken) {
+          try {
+            await this.database.collection<{
+              _id: string;
+              shopId: ObjectId;
+              saleId: ObjectId;
+              completedAt: Date;
+            }>('saleDraftCompletions').insertOne({
+              _id: createHash('sha256').update(input.saleDraftToken, 'utf8').digest('hex'),
+              shopId: actor.shopId,
+              saleId,
+              completedAt: now,
+            }, { session });
+          } catch (error) {
+            if (duplicateKey(error)) throw new Error('SALE_DRAFT_ALREADY_COMPLETED');
+            throw error;
+          }
         }
         return sale;
       });

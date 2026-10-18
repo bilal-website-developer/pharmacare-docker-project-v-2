@@ -217,7 +217,12 @@ export async function finishWriteIdempotency(
 export function requestUsesIdempotency(request: FastifyRequest): boolean {
   const route = request.routeOptions.url ?? '';
   return !['GET', 'HEAD', 'OPTIONS'].includes(request.method)
-    && !['/api/auth/login', '/api/auth/refresh', '/api/auth/logout'].includes(route);
+    && ![
+      '/api/auth/login',
+      '/api/auth/refresh',
+      '/api/auth/logout',
+      '/api/support/allow',
+    ].includes(route);
 }
 
 export function validateIdempotencyHeader(request: FastifyRequest): string | null {

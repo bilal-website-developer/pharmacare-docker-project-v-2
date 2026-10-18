@@ -39,7 +39,7 @@ export class MemoryRepository implements PharmacyRepository {
       email: values.email ?? 'owner@example.test',
       emailNormalized: (values.email ?? 'owner@example.test').toLowerCase(),
       fullName: values.fullName ?? 'Test Owner',
-      role: values.role ?? 'super_admin',
+      role: values.role ?? 'admin',
       isActive: values.isActive ?? true,
       permissions: values.permissions ?? ['pos', 'manage_users'],
       passwordHash: values.passwordHash ?? '',

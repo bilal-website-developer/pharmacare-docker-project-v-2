@@ -391,7 +391,7 @@ export class MemorySalesRepository implements SalesRepository {
       }
       const roleLimit = actor.role === 'cashier' ? 10n
         : actor.role === 'manager' ? 15n
-          : actor.role === 'admin' || actor.role === 'super_admin' ? 30n : 0n;
+          : actor.role === 'admin' ? 30n : 0n;
       const maxDiscount = [20_000n, subtotal * roleLimit / 100n, subtotal]
         .reduce((min, value) => min < value ? min : value);
       const discount = BigInt(input.discountPaisa);

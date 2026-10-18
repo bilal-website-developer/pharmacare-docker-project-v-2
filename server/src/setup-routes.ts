@@ -4,6 +4,7 @@ import { MongoClient, ObjectId } from 'mongodb';
 import { z } from 'zod';
 import type { AppConfig } from './config.js';
 import { hashPassword } from './auth-crypto.js';
+import { verifyLicence, type SignedLicence } from './licence.js';
 import type { UserRecord } from './models.js';
 import { MODULE_KEYS } from './permissions.js';
 
@@ -12,7 +13,15 @@ export interface SetupCollectionNames {
   users: string;
   setupState: string;
   auditLogs: string;
+  controlPlaneState?: string;
 }
+
+export interface ControlPlaneActivationResponse {
+  device_key: string;
+  licence: SignedLicence;
+}
+
+export type ControlPlaneActivator = (activationCode: string) => Promise<ControlPlaneActivationResponse>;
 
 interface SetupShopRecord {
   _id: ObjectId;
@@ -26,11 +35,21 @@ interface SetupStateRecord {
   consumedAt: Date;
 }
 
+interface ControlPlaneStateRecord {
+  _id: 'control-plane';
+  controlPlaneShopId: string;
+  deviceKeyHash: string;
+  licence: SignedLicence;
+  lastSeenAt: Date;
+  status: 'active' | 'suspended';
+}
+
 const DEFAULT_COLLECTIONS: SetupCollectionNames = {
   shops: 'shops',
   users: 'users',
   setupState: 'setupState',
   auditLogs: 'auditLogs',
+  controlPlaneState: 'controlPlaneState',
 };
 
 const passwordSchema = z.string().min(12).max(1024).superRefine((password, context) => {
@@ -46,6 +65,7 @@ const passwordSchema = z.string().min(12).max(1024).superRefine((password, conte
 });
 
 const setupSchema = z.object({
+  activationCode: z.string().trim().min(12).max(128),
   setupCode: z.string().min(32).max(128),
   shopName: z.string().trim().min(1).max(160),
   phone: z.string().trim().max(80).default(''),
@@ -65,6 +85,51 @@ const setupSchema = z.object({
   password: passwordSchema,
 }).strict();
 
+class SetupActivationError extends Error {
+  constructor(readonly statusCode: number, readonly errorCode: string) {
+    super(errorCode);
+  }
+}
+
+async function activateAtControlPlane(
+  config: AppConfig,
+  activationCode: string,
+  fetcher: typeof fetch = fetch,
+): Promise<ControlPlaneActivationResponse> {
+  if (!config.controlPlaneUrl) throw new SetupActivationError(503, 'CONTROL_PLANE_UNAVAILABLE');
+  let response: Response;
+  try {
+    response = await fetcher(new URL('/functions/v1/control-plane/activate', config.controlPlaneUrl), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ activation_code: activationCode, device_name: 'shop-server' }),
+    });
+  } catch {
+    throw new SetupActivationError(503, 'CONTROL_PLANE_UNAVAILABLE');
+  }
+  if (response.status === 403) throw new SetupActivationError(403, 'ACTIVATION_CODE_INVALID');
+  if (!response.ok) throw new SetupActivationError(502, 'CONTROL_PLANE_ACTIVATION_FAILED');
+
+  let result: unknown;
+  try {
+    result = await response.json();
+  } catch {
+    throw new SetupActivationError(502, 'CONTROL_PLANE_ACTIVATION_FAILED');
+  }
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) {
+    throw new SetupActivationError(502, 'CONTROL_PLANE_ACTIVATION_FAILED');
+  }
+  const activation = result as Record<string, unknown>;
+  if (typeof activation.device_key !== 'string'
+    || typeof activation.licence !== 'object' || activation.licence === null || Array.isArray(activation.licence)) {
+    throw new SetupActivationError(502, 'CONTROL_PLANE_ACTIVATION_FAILED');
+  }
+  return {
+    device_key: activation.device_key,
+    licence: activation.licence as SignedLicence,
+  };
+}
+
 function isDuplicateKey(error: unknown): boolean {
   return typeof error === 'object'
     && error !== null
@@ -83,12 +148,16 @@ export function registerSetupRoutes(
   client: MongoClient,
   config: AppConfig,
   collections: SetupCollectionNames = DEFAULT_COLLECTIONS,
+  activator: ControlPlaneActivator = (activationCode) => activateAtControlPlane(config, activationCode),
 ): void {
   const database = client.db(config.mongoDbName);
   const shops = database.collection<SetupShopRecord>(collections.shops);
   const users = database.collection<UserRecord>(collections.users);
   const setupState = database.collection<SetupStateRecord>(collections.setupState);
   const auditLogs = database.collection(collections.auditLogs);
+  const controlPlaneState = database.collection<ControlPlaneStateRecord>(
+    collections.controlPlaneState ?? 'controlPlaneState',
+  );
 
   app.get('/api/setup/status', async (_request, reply) => {
     const [shopCount, consumed] = await Promise.all([
@@ -100,7 +169,14 @@ export function registerSetupRoutes(
 
   app.post('/api/setup', async (request, reply) => {
     const parsed = setupSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_FAILED' });
+    if (!parsed.success) {
+      const fields: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const field = issue.path.join('.');
+        if (field && !fields[field]) fields[field] = issue.message;
+      }
+      return reply.code(400).send({ error: 'VALIDATION_FAILED', fields });
+    }
     if (!config.setupCodeHash || !config.setupCodeExpiresAt) {
       return reply.code(503).send({ error: 'SETUP_UNAVAILABLE' });
     }
@@ -110,6 +186,28 @@ export function registerSetupRoutes(
     }
 
     const now = new Date();
+    if (await shops.countDocuments({}, { limit: 1 }) > 0
+      || await setupState.findOne({ _id: 'initial-setup' }, { projection: { _id: 1 } })) {
+      return reply.code(409).send({ error: 'SETUP_ALREADY_COMPLETED' });
+    }
+    if (!config.licencePublicKey) return reply.code(503).send({ error: 'LICENCE_VERIFICATION_UNAVAILABLE' });
+    let activation: ControlPlaneActivationResponse;
+    try {
+      activation = await activator(parsed.data.activationCode);
+    } catch (error) {
+      if (error instanceof SetupActivationError) {
+        return reply.code(error.statusCode).send({ error: error.errorCode });
+      }
+      throw error;
+    }
+    if (!activation.device_key || !await verifyLicence(
+      activation.licence,
+      config.licencePublicKey,
+      activation.licence.payload?.shop_id,
+    )) {
+      return reply.code(502).send({ error: 'LICENCE_SIGNATURE_INVALID' });
+    }
+    const deviceKeyHash = createHash('sha256').update(activation.device_key).digest('hex');
     const shopId = new ObjectId();
     const userId = new ObjectId();
     const usernameNormalized = parsed.data.username.toLocaleLowerCase('en-US');
@@ -130,6 +228,7 @@ export function registerSetupRoutes(
         await shops.insertOne({
           _id: shopId,
           slug: config.bootstrapShopSlug,
+          controlPlaneShopId: activation.licence.payload.shop_id,
           name: parsed.data.shopName,
           status: 'ACTIVE',
           timeZone: parsed.data.timeZone,
@@ -165,7 +264,7 @@ export function registerSetupRoutes(
           email: parsed.data.email,
           emailNormalized,
           fullName: parsed.data.fullName,
-          role: 'super_admin',
+          role: 'admin',
           isActive: true,
           permissions: [...MODULE_KEYS],
           passwordHash,
@@ -176,6 +275,14 @@ export function registerSetupRoutes(
           updatedAt: now,
         };
         await users.insertOne(user, { session });
+        await controlPlaneState.insertOne({
+          _id: 'control-plane',
+          controlPlaneShopId: activation.licence.payload.shop_id,
+          deviceKeyHash,
+          licence: activation.licence,
+          lastSeenAt: now,
+          status: 'active',
+        }, { session });
         await auditLogs.insertMany([
           {
             shopId,
@@ -191,12 +298,12 @@ export function registerSetupRoutes(
             actorId: userId,
             entityId: userId,
             entityType: 'user',
-            event: 'user.bootstrap_super_admin',
+            event: 'user.bootstrap_admin',
             after: {
               username: parsed.data.username,
               email: parsed.data.email,
               fullName: parsed.data.fullName,
-              role: 'super_admin',
+              role: 'admin',
             },
             occurredAt: now,
           },

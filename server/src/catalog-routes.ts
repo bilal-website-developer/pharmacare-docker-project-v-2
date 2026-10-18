@@ -454,7 +454,7 @@ export function registerCatalogRoutes(
           sourceId,
           targetId,
           caller._id,
-          caller.role === 'admin' || caller.role === 'super_admin' || caller.permissions.includes('products'),
+          caller.role === 'admin' || caller.permissions.includes('products'),
           (source, target, count) => auditRecord(
             caller,
             `${collection === 'categories' ? 'category' : 'brand'}.merged`,
@@ -1077,7 +1077,7 @@ export function registerCatalogRoutes(
   app.get('/api/trash', {
     preHandler: [
       requireAuth(authRepository, tokenConfig, idempotencyStore),
-      requireRole('admin', 'super_admin'),
+      requireRole('admin'),
       requirePermission('products'),
     ],
   }, async (request, reply) => {

@@ -249,7 +249,7 @@ function containsCostField(value: unknown, depth = 0): boolean {
 }
 
 function canPrint(user: Caller, type: 'sale' | 'payment'): boolean {
-  return user.role === 'admin' || user.role === 'super_admin'
+  return user.role === 'admin'
     || (user.permissions.includes('pos')
       && user.permissions.includes(type === 'sale' ? 'pos_print_sale' : 'pos_print_payment'));
 }
@@ -393,7 +393,7 @@ export function registerPhaseSevenRoutes(
   const pos = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('pos')];
   const salesHistory = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('sales_history')];
   const expense = [requireAuth(authRepository, tokenConfig, idempotencyStore), requirePermission('expenses')];
-  const admin = [requireAuth(authRepository, tokenConfig, idempotencyStore), requireRole('admin', 'super_admin')];
+  const admin = [requireAuth(authRepository, tokenConfig, idempotencyStore), requireRole('admin')];
 
   app.get('/api/audit-logs', {
     preHandler: [...admin, requirePermission('manage_users')],
@@ -637,7 +637,7 @@ export function registerPhaseSevenRoutes(
     }
   });
 
-  app.get('/api/returns/pending', { preHandler: [...salesHistory, requireRole('manager', 'admin', 'super_admin')] }, async (request, reply) => {
+  app.get('/api/returns/pending', { preHandler: [...salesHistory, requireRole('manager', 'admin')] }, async (request, reply) => {
     const user = caller(request, reply);
     if (!user) return;
     const rows = await database.collection('saleReturns').find({
@@ -702,7 +702,7 @@ export function registerPhaseSevenRoutes(
     return reply.send({ items });
   });
 
-  app.post('/api/returns/:id/approve', { preHandler: [...salesHistory, requireRole('manager', 'admin', 'super_admin')] }, async (request, reply) => {
+  app.post('/api/returns/:id/approve', { preHandler: [...salesHistory, requireRole('manager', 'admin')] }, async (request, reply) => {
     const user = caller(request, reply);
     if (!user) return;
     const parsedId = idSchema.safeParse((request.params as { id?: unknown }).id);
@@ -736,7 +736,7 @@ export function registerPhaseSevenRoutes(
     return reply.send(returnDto(result));
   });
 
-  app.post('/api/returns/:id/reject', { preHandler: [...salesHistory, requireRole('manager', 'admin', 'super_admin')] }, async (request, reply) => {
+  app.post('/api/returns/:id/reject', { preHandler: [...salesHistory, requireRole('manager', 'admin')] }, async (request, reply) => {
     const user = caller(request, reply);
     if (!user) return;
     const parsedId = idSchema.safeParse((request.params as { id?: unknown }).id);
@@ -757,7 +757,7 @@ export function registerPhaseSevenRoutes(
     return reply.send(returnDto(rejected));
   });
 
-  app.post('/api/returns/:id/process', { preHandler: [...salesHistory, requireRole('manager', 'admin', 'super_admin')] }, async (request, reply) => {
+  app.post('/api/returns/:id/process', { preHandler: [...salesHistory, requireRole('manager', 'admin')] }, async (request, reply) => {
     const user = caller(request, reply);
     if (!user) return;
     const parsedId = idSchema.safeParse((request.params as { id?: unknown }).id);
@@ -956,7 +956,7 @@ export function registerPhaseSevenRoutes(
     });
   });
 
-  app.post('/api/sales/:id/void', { preHandler: [...salesHistory, requireRole('admin', 'super_admin')] }, async (request, reply) => {
+  app.post('/api/sales/:id/void', { preHandler: [...salesHistory, requireRole('admin')] }, async (request, reply) => {
     const user = caller(request, reply);
     if (!user) return;
     const parsedId = idSchema.safeParse((request.params as { id?: unknown }).id);
@@ -1159,7 +1159,7 @@ export function registerPhaseSevenRoutes(
     });
   });
 
-  app.post('/api/expenses/:id/void', { preHandler: [...expense, requireRole('admin', 'super_admin')] }, async (request, reply) => {
+  app.post('/api/expenses/:id/void', { preHandler: [...expense, requireRole('admin')] }, async (request, reply) => {
     const user = caller(request, reply);
     if (!user) return;
     const parsedId = idSchema.safeParse((request.params as { id?: unknown }).id);
@@ -1439,7 +1439,7 @@ export function registerPhaseSevenRoutes(
     const memoIdentityChanged = memoSettings
       ? ['storeName', 'address', 'phone'].some((key) => key in memoSettings)
       : false;
-    if ((parsed.data.shopName || parsed.data.profile || memoIdentityChanged) && user.role !== 'super_admin') {
+    if ((parsed.data.shopName || parsed.data.profile || memoIdentityChanged) && user.role !== 'admin') {
       return reply.code(403).send({ error: 'FORBIDDEN' });
     }
     const set: Document = { updatedAt: new Date() };
@@ -1677,7 +1677,7 @@ export function registerPhaseSevenRoutes(
     const record = await database.collection('printRequests').findOne({
       _id: requestId, shopId: user.shopId,
     });
-    if (!record || (id(record.requesterId) !== user._id.toHexString() && !['admin', 'super_admin'].includes(user.role))) {
+    if (!record || (id(record.requesterId) !== user._id.toHexString() && user.role !== 'admin')) {
       return reply.code(404).send({ error: 'NOT_FOUND' });
     }
     if (!canPrint(user, record.type === 'sale' ? 'sale' : 'payment')) return reply.code(403).send({ error: 'FORBIDDEN' });

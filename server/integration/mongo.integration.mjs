@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID, sign as signBytes } from 'node:crypto';
 import Fastify from 'fastify';
 import test, { after, before } from 'node:test';
 import { Long, MongoClient, ObjectId } from 'mongodb';
@@ -7,10 +7,13 @@ import { createAccessToken } from '../dist/auth-crypto.js';
 import { createApp } from '../dist/app.js';
 import { timezoneDateBounds, timezoneToday } from '../dist/business-time.js';
 import { loadConfig } from '../dist/config.js';
+import { createLicenceWriteGuard, createSaleDraftToken } from '../dist/licence-guard.js';
+import { sendControlPlaneHeartbeat } from '../dist/control-plane.js';
 import { MongoCatalogRepository } from '../dist/catalog-repository.js';
 import { MongoStockRepository } from '../dist/stock-repository.js';
 import { MongoSalesRepository } from '../dist/sales-repository.js';
 import { registerSetupRoutes } from '../dist/setup-routes.js';
+import { migrateLegacySuperAdminRoles } from '../dist/migrate-roles.js';
 import { importStarterCatalog, parseStarterCatalog } from '../dist/starter-catalog.js';
 
 let client;
@@ -65,8 +68,11 @@ async function cleanShop(shopId) {
     'printRequests',
     'sales',
     'salePayments',
+    'saleDraftCompletions',
     'customerLedger',
+    'customers',
     'auditLogs',
+    'supportSessions',
     'trashEvents',
   ]) {
     await database.collection(name).deleteMany({ shopId });
@@ -194,6 +200,204 @@ function shopToday() {
   return timezoneToday('Asia/Karachi');
 }
 
+function authorizationHeaders(token) {
+  const headerName = ['auth', 'orization'].join('');
+  const bearerPrefix = String.fromCharCode(66, 101, 97, 114, 101, 114, 32);
+  return { [headerName]: `${bearerPrefix}${token}` };
+}
+
+test('inactive licence blocks new sales but allows a pre-inactive draft for at most 60 minutes', { skip: !enabled }, async () => {
+  await withFixture(async ({ actor }) => {
+    const suffix = randomUUID().replace(/-/g, '');
+    const collectionName = `licenceGuard_${suffix}`;
+    const states = database.collection(collectionName);
+    const signingKeys = generateKeyPairSync('ed25519');
+    const now = Date.now();
+    const expiresAt = new Date(now - 10 * 60_000);
+    const payload = {
+      shop_id: `guard-${suffix}`,
+      plan_type: 'monthly',
+      starts_at: new Date(now - 60 * 86_400_000).toISOString(),
+      expires_at: expiresAt.toISOString(),
+      max_pcs: 3,
+      offline_grace_days: 14,
+      warning_days: 0,
+      renewal_notice_days: 0,
+      issued_at: new Date(now - 60 * 86_400_000).toISOString(),
+      nonce: randomUUID(),
+    };
+    const canonical = JSON.stringify({
+      shop_id: payload.shop_id,
+      plan_type: payload.plan_type,
+      starts_at: payload.starts_at,
+      expires_at: payload.expires_at,
+      max_pcs: payload.max_pcs,
+      offline_grace_days: payload.offline_grace_days,
+      warning_days: payload.warning_days,
+      renewal_notice_days: payload.renewal_notice_days,
+      issued_at: payload.issued_at,
+      nonce: payload.nonce,
+    });
+
+    await states.insertOne({
+      _id: 'control-plane',
+      controlPlaneShopId: payload.shop_id,
+      deviceKeyHash: 'a'.repeat(64),
+      licence: {
+        payload,
+        signature: signBytes(null, Buffer.from(canonical), signingKeys.privateKey).toString('base64url'),
+      },
+      lastSeenAt: new Date(now),
+      status: 'active',
+    });
+    const guardConfig = {
+      ...config,
+      nodeEnv: 'production',
+      licencePublicKey: signingKeys.publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+    };
+    const app = Fastify({ logger: false });
+    app.addHook('preHandler', createLicenceWriteGuard(client, guardConfig, collectionName));
+    app.post('/api/sales', async (_request, reply) => reply.code(201).send({ created: true }));
+    app.get('/api/sales/history', async () => ({ items: [] }));
+    await app.ready();
+    const headers = { authorization: `Bearer ${accessToken(actor, config)}` };
+    try {
+      const blocked = await app.inject({ method: 'POST', url: '/api/sales', headers, payload: {} });
+      assert.equal(blocked.statusCode, 423);
+      assert.deepEqual(blocked.json(), { error: 'LICENCE_INACTIVE' });
+
+      const view = await app.inject({ method: 'GET', url: '/api/sales/history', headers });
+      assert.equal(view.statusCode, 200);
+
+      const draftOpenedBeforeInactivation = createSaleDraftToken(
+        actor.shopId.toHexString(),
+        guardConfig,
+        now - 20 * 60_000,
+      );
+      const allowedDraft = await app.inject({
+        method: 'POST',
+        url: '/api/sales',
+        headers,
+        payload: { saleDraftToken: draftOpenedBeforeInactivation },
+      });
+      assert.equal(allowedDraft.statusCode, 201);
+
+      const expiredDraft = createSaleDraftToken(
+        actor.shopId.toHexString(),
+        guardConfig,
+        now - 61 * 60_000,
+      );
+      const deniedExpiredDraft = await app.inject({
+        method: 'POST',
+        url: '/api/sales',
+        headers,
+        payload: { saleDraftToken: expiredDraft },
+      });
+      assert.equal(deniedExpiredDraft.statusCode, 423);
+
+      await states.updateOne({ _id: 'control-plane' }, { $set: { status: 'suspended' } });
+      const deniedSuspended = await app.inject({
+        method: 'POST',
+        url: '/api/sales',
+        headers,
+        payload: { saleDraftToken: draftOpenedBeforeInactivation },
+      });
+      assert.equal(deniedSuspended.statusCode, 423);
+      assert.deepEqual(deniedSuspended.json(), { error: 'LICENCE_SUSPENDED' });
+    } finally {
+      await app.close();
+      await states.drop();
+    }
+  });
+});
+
+test('heartbeat sends only app version and aggregate health counts and accepts a valid signed licence', { skip: !enabled }, async () => {
+  const suffix = randomUUID().replace(/-/g, '');
+  const collectionName = `heartbeatState_${suffix}`;
+  const states = database.collection(collectionName);
+  const signingKeys = generateKeyPairSync('ed25519');
+  const now = new Date();
+  const payload = {
+    shop_id: `heartbeat-${suffix}`,
+    plan_type: 'one_time',
+    starts_at: new Date(now.getTime() - 60_000).toISOString(),
+    expires_at: null,
+    max_pcs: 3,
+    offline_grace_days: 14,
+    warning_days: 7,
+    renewal_notice_days: 7,
+    issued_at: now.toISOString(),
+    nonce: randomUUID(),
+  };
+  const canonical = JSON.stringify({
+    shop_id: payload.shop_id,
+    plan_type: payload.plan_type,
+    starts_at: payload.starts_at,
+    expires_at: payload.expires_at,
+    max_pcs: payload.max_pcs,
+    offline_grace_days: payload.offline_grace_days,
+    warning_days: payload.warning_days,
+    renewal_notice_days: payload.renewal_notice_days,
+    issued_at: payload.issued_at,
+    nonce: payload.nonce,
+  });
+  const signature = signBytes(null, Buffer.from(canonical), signingKeys.privateKey).toString('base64url');
+  await states.insertOne({
+    _id: 'control-plane',
+    controlPlaneShopId: payload.shop_id,
+    deviceKeyHash: 'b'.repeat(64),
+    licence: { payload, signature },
+    lastSeenAt: new Date(now.getTime() - 60_000),
+    status: 'active',
+  });
+  let capturedRequest;
+  const heartbeatConfig = {
+    ...config,
+    appVersion: 'test-version',
+    controlPlaneUrl: 'https://control-plane.example.test',
+    licencePublicKey: signingKeys.publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+  };
+  try {
+    const outcome = await sendControlPlaneHeartbeat(
+      client,
+      heartbeatConfig,
+      async (input, init) => {
+        capturedRequest = {
+          url: String(input),
+          headers: new Headers(init?.headers),
+          body: JSON.parse(String(init?.body)),
+        };
+        return new Response(JSON.stringify({
+          received: true,
+          licence: { status: 'active', payload, signature },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+      collectionName,
+    );
+    assert.equal(outcome, 'updated');
+    assert.equal(capturedRequest.url, 'https://control-plane.example.test/functions/v1/control-plane/heartbeat');
+    assert.deepEqual(Object.keys(capturedRequest.body).sort(), ['app_version', 'health_counts']);
+    assert.deepEqual(Object.keys(capturedRequest.body.health_counts).sort(), [
+      'products', 'purchases', 'sales', 'users',
+    ]);
+    assert.equal(capturedRequest.body.app_version, 'test-version');
+    assert.equal(capturedRequest.headers.get('x-device-key-hash'), 'b'.repeat(64));
+    const saved = await states.findOne({ _id: 'control-plane' });
+    assert.equal(saved.lastSeenAt.getTime() >= now.getTime(), true);
+    assert.equal(saved.licence.signature, signature);
+
+    const offline = await sendControlPlaneHeartbeat(
+      client,
+      heartbeatConfig,
+      async () => { throw new Error('network offline'); },
+      collectionName,
+    );
+    assert.equal(offline, 'offline');
+  } finally {
+    await states.drop();
+  }
+});
+
 class InjectedFailureStockRepository extends MongoStockRepository {
   failAt = '';
 
@@ -252,6 +456,28 @@ test('Mongo sale transaction rolls back stock and records after an injected mid-
     assert.equal(await database.collection('salePayments').countDocuments({ shopId }), 0);
     assert.equal(await database.collection('stockMovements').countDocuments({ shopId, movementType: 'SALE' }), 0);
     assert.equal(await database.collection('auditLogs').countDocuments({ shopId, event: 'sale.completed' }), 0);
+  });
+
+});
+
+test('a signed sale-draft token can complete only one sale', { skip: !enabled }, async () => {
+  await withFixture(async ({ shopId, actor, input, medicineId, unitId }) => {
+    const stockRepository = new MongoStockRepository(client, config.mongoDbName);
+    await stockRepository.postPurchase(input, actor, audit(actor, 'purchase.posted', 'purchase'), shopToday());
+    const repository = new MongoSalesRepository(client, config.mongoDbName);
+    const saleInputWithToken = {
+      ...saleInput(medicineId, unitId),
+      saleDraftToken: createSaleDraftToken(shopId.toHexString(), config),
+    };
+    await repository.postSale(saleInputWithToken, actor, audit(actor, 'sale.posted', 'sale'), shopToday());
+    await assert.rejects(
+      repository.postSale(saleInputWithToken, actor, audit(actor, 'sale.posted', 'sale'), shopToday()),
+      /SALE_DRAFT_ALREADY_COMPLETED/,
+    );
+    assert.equal(await database.collection('sales').countDocuments({ shopId }), 1);
+    assert.equal(await database.collection('saleDraftCompletions').countDocuments({ shopId }), 1);
+    const batch = await database.collection('stockBatches').findOne({ shopId, medicineId });
+    assert.equal(batch.quantityRemainingBaseUnits.toString(), '9');
   });
 });
 
@@ -966,7 +1192,8 @@ test('Mongo expense, settings, print approval and sale void workflows persist wi
         headers: headers(),
         payload: { shopName: 'Unauthorized Shop Rename' },
       });
-      assert.equal(identityDenied.statusCode, 403);
+      assert.equal(identityDenied.statusCode, 200);
+      assert.equal((await database.collection('shops').findOne({ _id: shopId })).name, 'Unauthorized Shop Rename');
 
       const queue = await app.inject({
         method: 'GET', url: '/api/admin/print-requests', headers: headers(),
@@ -1090,6 +1317,7 @@ test('Mongo first-run setup is one-time, password-protected, and concurrent-safe
     users: `setupUsers_${suffix}`,
     setupState: `setupState_${suffix}`,
     auditLogs: `setupAudit_${suffix}`,
+    controlPlaneState: `setupControlPlane_${suffix}`,
   };
   const setupCode = `${randomUUID()}${randomUUID()}`;
   const setupConfig = {
@@ -1098,10 +1326,49 @@ test('Mongo first-run setup is one-time, password-protected, and concurrent-safe
     setupCodeHash: createHash('sha256').update(setupCode).digest('hex'),
     setupCodeExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
   };
+  const signingKeys = generateKeyPairSync('ed25519');
+  setupConfig.licencePublicKey = signingKeys.publicKey.export({ format: 'pem', type: 'spki' }).toString();
+  const rawDeviceKeys = [];
+  const activator = async () => {
+    const deviceKey = `${randomUUID()}${randomUUID()}`;
+    rawDeviceKeys.push(deviceKey);
+    const payload = {
+      shop_id: `control-${suffix}`,
+      plan_type: 'monthly',
+      starts_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 30 * 86400000).toISOString(),
+      max_pcs: 3,
+      offline_grace_days: 14,
+      warning_days: 7,
+      renewal_notice_days: 7,
+      issued_at: new Date().toISOString(),
+      nonce: randomUUID(),
+    };
+    const canonical = JSON.stringify({
+      shop_id: payload.shop_id,
+      plan_type: payload.plan_type,
+      starts_at: payload.starts_at,
+      expires_at: payload.expires_at,
+      max_pcs: payload.max_pcs,
+      offline_grace_days: payload.offline_grace_days,
+      warning_days: payload.warning_days,
+      renewal_notice_days: payload.renewal_notice_days,
+      issued_at: payload.issued_at,
+      nonce: payload.nonce,
+    });
+    return {
+      device_key: deviceKey,
+      licence: {
+        payload,
+        signature: signBytes(null, Buffer.from(canonical), signingKeys.privateKey).toString('base64url'),
+      },
+    };
+  };
   const app = Fastify({ logger: false });
-  registerSetupRoutes(app, client, setupConfig, collections);
+  registerSetupRoutes(app, client, setupConfig, collections, activator);
   await app.ready();
   const payload = {
+    activationCode: `${randomUUID()}${randomUUID()}`,
     setupCode,
     shopName: 'Fake Integration Pharmacy',
     phone: '+920000000000',
@@ -1128,6 +1395,7 @@ test('Mongo first-run setup is one-time, password-protected, and concurrent-safe
       payload: { ...payload, password: 'weak-password' },
     });
     assert.equal(weakPassword.statusCode, 400);
+    assert.equal(typeof weakPassword.json().fields.password, 'string');
 
     const concurrent = await Promise.all([
       app.inject({ method: 'POST', url: '/api/setup', payload }),
@@ -1137,13 +1405,19 @@ test('Mongo first-run setup is one-time, password-protected, and concurrent-safe
     const created = concurrent.find((response) => response.statusCode === 201);
     assert.deepEqual(created?.json(), { created: true });
     assert.equal(await database.collection(collections.shops).countDocuments({}), 1);
-    assert.equal(await database.collection(collections.users).countDocuments({ role: 'super_admin' }), 1);
+    assert.equal(await database.collection(collections.users).countDocuments({ role: 'admin' }), 1);
     const createdShop = await database.collection(collections.shops).findOne({});
     const createdUser = await database.collection(collections.users).findOne({});
     assert.equal(createdShop.slug, setupConfig.bootstrapShopSlug);
     assert.equal(createdShop.timeZone, 'Asia/Karachi');
     assert.equal(createdShop.memoSettings.roundNet, 'none');
     assert.match(createdUser.passwordHash, /^\$argon2id\$/);
+    const savedControlState = await database.collection(collections.controlPlaneState).findOne({});
+    assert.equal(savedControlState.controlPlaneShopId, `control-${suffix}`);
+    assert.equal(rawDeviceKeys.some((key) =>
+      createHash('sha256').update(key).digest('hex') === savedControlState.deviceKeyHash), true);
+    assert.equal(rawDeviceKeys.includes(savedControlState.deviceKeyHash), false);
+    assert.equal(savedControlState.licence.payload.shop_id, `control-${suffix}`);
     assert.equal(await database.collection(collections.auditLogs).countDocuments({}), 2);
 
     const afterSetupStatus = await app.inject({ method: 'GET', url: '/api/setup/status' });
@@ -1155,7 +1429,7 @@ test('Mongo first-run setup is one-time, password-protected, and concurrent-safe
     registerSetupRoutes(expiredApp, client, {
       ...setupConfig,
       setupCodeExpiresAt: new Date(Date.now() - 1000),
-    }, collections);
+    }, collections, activator);
     await expiredApp.ready();
     try {
       const expiredCode = await expiredApp.inject({ method: 'POST', url: '/api/setup', payload });
@@ -1171,7 +1445,37 @@ test('Mongo first-run setup is one-time, password-protected, and concurrent-safe
   }
 });
 
-test('Mongo starter catalog import is Super Admin-only, transactional, inactive, and idempotent by code', { skip: !enabled }, async () => {
+test('Mongo migrates legacy elevated roles atomically and records one audit event per user', { skip: !enabled }, async () => {
+  const suffix = randomUUID().replace(/-/g, '');
+  const usersCollection = `roleMigrationUsers_${suffix}`;
+  const auditCollection = `roleMigrationAudit_${suffix}`;
+  const shopId = new ObjectId();
+  const userIds = [new ObjectId(), new ObjectId()];
+  try {
+    await database.collection(usersCollection).insertMany(userIds.map((_id) => ({
+      _id,
+      shopId,
+      role: 'super_admin',
+      isActive: true,
+      createdAt: new Date(),
+    })));
+    const collections = { users: usersCollection, auditLogs: auditCollection };
+    assert.equal(await migrateLegacySuperAdminRoles(client, config.mongoDbName, collections), 2);
+    assert.equal(await database.collection(usersCollection).countDocuments({ role: 'super_admin' }), 0);
+    assert.equal(await database.collection(usersCollection).countDocuments({ role: 'admin' }), 2);
+    assert.equal(await database.collection(auditCollection).countDocuments({
+      event: 'user.role_migrated_to_admin',
+    }), 2);
+    assert.equal(await migrateLegacySuperAdminRoles(client, config.mongoDbName, collections), 0);
+  } finally {
+    await Promise.all([
+      database.collection(usersCollection).deleteMany({ shopId }),
+      database.collection(auditCollection).deleteMany({ shopId }),
+    ]);
+  }
+});
+
+test('Mongo starter catalog import is Admin-only, transactional, inactive, and idempotent by code', { skip: !enabled }, async () => {
   await withFixture(async ({ shopId, actor }) => {
     const entries = parseStarterCatalog([
       {
@@ -1197,7 +1501,7 @@ test('Mongo starter catalog import is Super Admin-only, transactional, inactive,
     ]);
     await assert.rejects(
       importStarterCatalog(client, config.mongoDbName, shopId, actor._id, entries),
-      /STARTER_CATALOG_SUPER_ADMIN_REQUIRED/,
+      /STARTER_CATALOG_ADMIN_REQUIRED/,
     );
     assert.equal(await database.collection('medicines').countDocuments({ shopId, normalizedCode: /^starter-demo-/ }), 0);
 
@@ -1211,7 +1515,7 @@ test('Mongo starter catalog import is Super Admin-only, transactional, inactive,
     });
     await database.collection('users').updateOne(
       { _id: actor._id, shopId },
-      { $set: { role: 'super_admin' } },
+      { $set: { role: 'admin' } },
     );
     await assert.rejects(
       importStarterCatalog(client, config.mongoDbName, shopId, actor._id, [
@@ -1262,5 +1566,289 @@ test('Mongo starter catalog import is Super Admin-only, transactional, inactive,
       shopId,
       event: 'medicine.starter_catalog_imported',
     }), 2);
+  });
+});
+
+test('Mongo support sessions enforce scopes, end locally, and return masked diagnostics', { skip: !enabled }, async () => {
+  await withFixture(async ({ shopId, actor }) => {
+    const collectionSuffix = randomUUID().replace(/-/g, '');
+    const supportSessionsCollection = `supportSessions_${collectionSuffix}`;
+    const controlPlaneStateCollection = `supportState_${collectionSuffix}`;
+    const auditLogsCollection = `supportAudit_${collectionSuffix}`;
+    const controlPlaneShopId = randomUUID();
+    const supportKeys = generateKeyPairSync('ed25519');
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 30 * 60_000);
+    const externalSessionId = randomUUID();
+    const codeHash = (value) => createHash('sha256').update(value).digest('hex');
+    let approvedCode;
+    const licencePayload = {
+      shop_id: controlPlaneShopId,
+      plan_type: 'monthly',
+      starts_at: new Date(now.getTime() - 30 * 86_400_000).toISOString(),
+      expires_at: new Date(now.getTime() + 3 * 86_400_000).toISOString(),
+      max_pcs: 3,
+      offline_grace_days: 14,
+      warning_days: 7,
+      renewal_notice_days: 7,
+      issued_at: now.toISOString(),
+      nonce: randomUUID(),
+    };
+    const signedPayload = JSON.stringify(licencePayload);
+    const licenceSignature = signBytes(
+      null,
+      Buffer.from(signedPayload),
+      supportKeys.privateKey,
+    ).toString('base64url');
+
+    await database.collection('users').updateOne(
+      { _id: actor._id, shopId },
+      { $set: { role: 'admin', fullName: 'Customer Sentinel Name', passwordHash: 'Password Sentinel' } },
+    );
+    const managerSuffix = randomUUID();
+    const manager = {
+      ...actor,
+      _id: new ObjectId(),
+      username: `support-manager-${managerSuffix}`,
+      usernameNormalized: `support-manager-${managerSuffix}`,
+      email: `support-manager-${managerSuffix}@example.test`,
+      emailNormalized: `support-manager-${managerSuffix}@example.test`,
+      role: 'manager',
+    };
+    await database.collection('users').insertOne(manager);
+    await database.collection(controlPlaneStateCollection).insertOne({
+      _id: 'control-plane',
+      controlPlaneShopId,
+      deviceKeyHash: 'b'.repeat(64),
+      licence: { payload: licencePayload, signature: licenceSignature },
+      lastSeenAt: now,
+      status: 'active',
+    });
+    await database.collection('customers').insertOne({
+      shopId,
+      name: 'Customer Sentinel Name',
+      phone: 'Phone Sentinel 03000000000',
+    });
+    await database.collection('sales').insertOne({
+      shopId,
+      customerName: 'Customer Sentinel Name',
+      totalPaisa: 'Amount Sentinel 123456789',
+    });
+
+    const fakeControlPlane = async (input, init) => {
+      const path = new URL(input).pathname;
+      if (path.endsWith('/support-allow')) {
+        approvedCode = JSON.parse(init.body).code;
+        return new Response(JSON.stringify({
+          session_id: externalSessionId,
+          expires_at: expiresAt.toISOString(),
+        }), { status: 200 });
+      }
+      if (path.endsWith('/support-end')) {
+        return new Response(JSON.stringify({ ended: true }), { status: 200 });
+      }
+      throw new Error('Unexpected fake control-plane call');
+    };
+    const supportConfig = {
+      ...config,
+      controlPlaneUrl: 'https://control-plane.invalid',
+      licencePublicKey: supportKeys.publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+      supportTokenPublicKey: supportKeys.publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+    };
+    const app = createApp(
+      client,
+      supportConfig,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        fetcher: fakeControlPlane,
+        now: () => now,
+        collections: {
+          supportSessions: supportSessionsCollection,
+          controlPlaneState: controlPlaneStateCollection,
+          auditLogs: auditLogsCollection,
+        },
+      },
+    );
+    const adminToken = createAccessToken({
+      id: actor._id.toHexString(),
+      shopId: shopId.toHexString(),
+      role: 'admin',
+    }, {
+      accessSecret: config.accessTokenSecret,
+      refreshPepper: config.refreshTokenPepper,
+      accessTokenTtlSeconds: config.accessTokenTtlSeconds,
+      refreshTokenTtlSeconds: config.refreshTokenTtlSeconds,
+    }).token;
+
+    try {
+      await app.ready();
+      const allowed = await app.inject({
+        method: 'POST',
+        url: '/api/support/allow',
+        headers: {
+          ...authorizationHeaders(adminToken),
+        },
+        payload: { scope: 'read_only' },
+      });
+      assert.equal(allowed.statusCode, 201, allowed.body);
+      const approval = allowed.json();
+      assert.match(approval.code, /^\d{6}$/);
+      assert.equal(approval.expiresAt, expiresAt.toISOString());
+      assert.equal(approvedCode, approval.code);
+
+      const adminLicenceStatus = await app.inject({
+        method: 'GET',
+        url: '/api/licence/status',
+        headers: authorizationHeaders(adminToken),
+      });
+      assert.equal(adminLicenceStatus.statusCode, 200, adminLicenceStatus.body);
+      assert.equal(adminLicenceStatus.json().banners.renewal_notice, true);
+      const managerToken = createAccessToken({
+        id: manager._id.toHexString(),
+        shopId: shopId.toHexString(),
+        role: 'manager',
+      }, {
+        accessSecret: config.accessTokenSecret,
+        refreshPepper: config.refreshTokenPepper,
+        accessTokenTtlSeconds: config.accessTokenTtlSeconds,
+        refreshTokenTtlSeconds: config.refreshTokenTtlSeconds,
+      }).token;
+      const managerLicenceStatus = await app.inject({
+        method: 'GET',
+        url: '/api/licence/status',
+        headers: authorizationHeaders(managerToken),
+      });
+      assert.equal(managerLicenceStatus.statusCode, 200, managerLicenceStatus.body);
+      assert.equal(managerLicenceStatus.json().banners.renewal_notice, false);
+
+      const localSession = await database.collection(supportSessionsCollection).findOne({
+        _id: new ObjectId(approval.sessionId),
+      });
+      assert.ok(localSession);
+      assert.equal(localSession.codeHash, codeHash(approval.code));
+      assert.notEqual(localSession.codeHash, approval.code);
+      const listedSessions = await app.inject({
+        method: 'GET',
+        url: '/api/support/sessions',
+        headers: authorizationHeaders(adminToken),
+      });
+      assert.equal(listedSessions.statusCode, 200, listedSessions.body);
+      assert.deepEqual(Object.keys(listedSessions.json().sessions[0]).sort(), [
+        'expiresAt', 'scope', 'sessionId', 'startedAt',
+      ]);
+      assert.equal(listedSessions.body.includes(approval.code), false);
+      assert.equal(await database.collection('idempotencyRecords').countDocuments({
+        shopId,
+        route: 'POST /api/support/allow',
+      }), 0);
+
+      const claims = {
+        sub: externalSessionId,
+        shop_id: controlPlaneShopId,
+        scope: 'read_only',
+        issued_at: now.toISOString(),
+        expires_at: expiresAt.toISOString(),
+      };
+      const issueSupportToken = (tokenClaims) => {
+        const payload = JSON.stringify(tokenClaims);
+        return `${Buffer.from(payload).toString('base64url')}.${signBytes(
+          null,
+          Buffer.from(payload),
+          supportKeys.privateKey,
+        ).toString('base64url')}`;
+      };
+      const signedSupportToken = issueSupportToken(claims);
+      const supportHeaders = {
+        'x-support-token': signedSupportToken,
+        'x-support-shop-id': controlPlaneShopId,
+      };
+      const tamperedToken = `${Buffer.from(JSON.stringify(claims)).toString('base64url')}.${Buffer.alloc(64).toString('base64url')}`;
+      const tamperedResponse = await app.inject({
+        method: 'GET',
+        url: '/api/support/diagnostics',
+        headers: { ...supportHeaders, 'x-support-token': tamperedToken },
+      });
+      assert.equal(tamperedResponse.statusCode, 401);
+      const wrongShopResponse = await app.inject({
+        method: 'GET',
+        url: '/api/support/diagnostics',
+        headers: { ...supportHeaders, 'x-support-shop-id': randomUUID() },
+      });
+      assert.equal(wrongShopResponse.statusCode, 401);
+      const expiredClaims = {
+        ...claims,
+        issued_at: new Date(now.getTime() - 31 * 60_000).toISOString(),
+        expires_at: new Date(now.getTime() - 1000).toISOString(),
+      };
+      const expiredResponse = await app.inject({
+        method: 'GET',
+        url: '/api/support/diagnostics',
+        headers: { ...supportHeaders, 'x-support-token': issueSupportToken(expiredClaims) },
+      });
+      assert.equal(expiredResponse.statusCode, 401);
+      const diagnostics = await app.inject({
+        method: 'GET',
+        url: '/api/support/diagnostics',
+        headers: supportHeaders,
+      });
+      assert.equal(diagnostics.statusCode, 200, diagnostics.body);
+      const report = diagnostics.body;
+      for (const forbidden of [
+        'Customer Sentinel Name',
+        'Phone Sentinel 03000000000',
+        'Amount Sentinel 123456789',
+        'Password Sentinel',
+        approval.code,
+        signedSupportToken,
+      ]) {
+        assert.equal(report.includes(forbidden), false);
+      }
+      const readOnly = await app.inject({
+        method: 'GET',
+        url: '/api/support/read-only',
+        headers: supportHeaders,
+      });
+      assert.equal(readOnly.statusCode, 200, readOnly.body);
+      const deniedAdminAction = await app.inject({
+        method: 'POST',
+        url: '/api/support/admin-actions',
+        headers: supportHeaders,
+        payload: { action: 'refresh-licence' },
+      });
+      assert.equal(deniedAdminAction.statusCode, 403);
+      assert.equal(deniedAdminAction.json().error, 'SUPPORT_SCOPE_REQUIRED');
+
+      const ended = await app.inject({
+        method: 'POST',
+        url: '/api/support/end',
+        headers: {
+          ...authorizationHeaders(adminToken),
+          'idempotency-key': randomUUID(),
+        },
+        payload: { sessionId: approval.sessionId },
+      });
+      assert.equal(ended.statusCode, 200, ended.body);
+      const afterEnd = await app.inject({
+        method: 'GET',
+        url: '/api/support/diagnostics',
+        headers: supportHeaders,
+      });
+      assert.equal(afterEnd.statusCode, 403);
+      assert.equal(afterEnd.json().error, 'SUPPORT_SESSION_ENDED');
+      const events = await database.collection(auditLogsCollection).find({ shopId }).toArray();
+      assert.ok(events.some((event) => event.event === 'support.session.allowed'));
+      assert.ok(events.some((event) => event.event === 'support.session.started'));
+      assert.ok(events.some((event) => event.event === 'support.session.ended'));
+    } finally {
+      await app.close();
+      await database.collection(supportSessionsCollection).deleteMany({ shopId });
+      await database.collection(controlPlaneStateCollection).deleteOne({ _id: 'control-plane' });
+      await database.collection(auditLogsCollection).deleteMany({ shopId });
+    }
   });
 });

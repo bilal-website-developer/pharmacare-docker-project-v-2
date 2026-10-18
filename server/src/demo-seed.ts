@@ -216,11 +216,11 @@ export async function seedDemoData(
       const actor = await database.collection('users').findOne({
         _id: actorId,
         shopId,
-        role: 'super_admin',
+        role: 'admin',
         isActive: true,
         deletedAt: null,
       }, { session, projection: { _id: 1 } });
-      if (!actor) throw new Error('DEMO_SEED_SUPER_ADMIN_REQUIRED');
+      if (!actor) throw new Error('DEMO_SEED_ADMIN_REQUIRED');
       const demoSeedRuns = database.collection<Document & { _id: string }>('demoSeedRuns');
       if (await demoSeedRuns.findOne({ _id: markerId, shopId }, { session })) {
         return false;

@@ -31,6 +31,10 @@ import { MongoSalesRepository, type SalesRepository } from './sales-repository.j
 import { registerSalesRoutes } from './sales-routes.js';
 import { registerPhaseSevenRoutes } from './phase7-routes.js';
 import { registerSetupRoutes } from './setup-routes.js';
+import { createLicenceWriteGuard, createSaleDraftToken, readVerifiedLicenceState, type LocalControlPlaneRecord } from './licence-guard.js';
+import { requireAuth } from './auth-routes.js';
+import { registerSupportRoutes, type SupportRouteOptions } from './support-routes.js';
+import { licenceBannerVisibleToRole } from './licence.js';
 
 export interface RegisteredApiRoute {
   method: string;
@@ -65,6 +69,7 @@ export function createApp(
   idempotencyStore?: IdempotencyStore,
   salesRepository?: SalesRepository,
   requestRateLimitStore?: RequestRateLimitStore,
+  supportRouteOptions?: SupportRouteOptions,
 ): FastifyInstance {
   const resolvedIdempotencyStore = idempotencyStore
     ?? (config ? new MongoIdempotencyStore(mongoClient.db(config.mongoDbName)) : null);
@@ -104,7 +109,10 @@ export function createApp(
       .header('Access-Control-Allow-Origin', config.webOrigin)
       .header('Access-Control-Allow-Credentials', 'true')
       .header('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS')
-      .header('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key, X-CSRF-Token')
+      .header(
+        'Access-Control-Allow-Headers',
+        'Authorization, Content-Type, Idempotency-Key, X-CSRF-Token, X-Support-Token, X-Support-Shop-Id',
+      )
       .header('Access-Control-Max-Age', '600')
       .header('Vary', 'Origin');
   });
@@ -127,6 +135,7 @@ export function createApp(
       );
     });
   }
+  if (config) app.addHook('preHandler', createLicenceWriteGuard(mongoClient, config));
   app.addHook('onSend', async (request, reply, payload) => {
     addSecurityHeaders(reply);
     if (request.authUser?.role !== 'cashier') return payload;
@@ -215,6 +224,46 @@ export function createApp(
     if (!resolvedIdempotencyStore) throw new Error('Idempotency store is not configured');
     registerSetupRoutes(app, mongoClient, config);
     registerAuthRoutes(app, pharmacyRepository, tokenConfig, resolvedIdempotencyStore);
+    registerSupportRoutes(
+      app,
+      mongoClient,
+      config,
+      pharmacyRepository,
+      tokenConfig,
+      resolvedIdempotencyStore,
+      supportRouteOptions,
+    );
+    const controlPlaneStateCollection = supportRouteOptions?.collections?.controlPlaneState
+      ?? 'controlPlaneState';
+    app.get('/api/licence/status', {
+      preHandler: requireAuth(pharmacyRepository, tokenConfig, resolvedIdempotencyStore),
+    }, async (request, reply) => {
+      const user = request.authUser;
+      if (!user) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const stateCollection = mongoClient.db(config.mongoDbName)
+        .collection<LocalControlPlaneRecord>(controlPlaneStateCollection);
+      const current = await readVerifiedLicenceState(stateCollection, config);
+      if (!current) return reply.code(503).send({ error: 'LICENCE_UNAVAILABLE' });
+      const { decision } = current;
+      const status = decision.state === 'suspended' || decision.state === 'inactive'
+        ? decision.state
+        : 'ok';
+      return {
+        status,
+        banners: {
+          renewal_notice: decision.banners.renewal_notice
+            && licenceBannerVisibleToRole('renewal_notice', user.role),
+          warning: decision.banners.warning
+            && licenceBannerVisibleToRole('warning', user.role),
+          inactive: decision.banners.inactive
+            && licenceBannerVisibleToRole('inactive', user.role),
+          offline_warning: decision.banners.offline_warning
+            && licenceBannerVisibleToRole('offline_warning', user.role),
+          clock_warning: decision.banners.clock_warning
+            && licenceBannerVisibleToRole('clock_warning', user.role),
+        },
+      };
+    });
     registerUserRoutes(app, pharmacyRepository, tokenConfig, resolvedIdempotencyStore);
     registerCatalogRoutes(
       app,
@@ -245,6 +294,20 @@ export function createApp(
       tokenConfig,
       resolvedIdempotencyStore,
     );
+    app.get('/api/sales/draft-token', {
+      preHandler: requireAuth(pharmacyRepository, tokenConfig, resolvedIdempotencyStore),
+    }, async (request, reply) => {
+      const user = request.authUser;
+      if (!user) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const stateCollection = mongoClient.db(config.mongoDbName)
+        .collection<LocalControlPlaneRecord>('controlPlaneState');
+      const current = await readVerifiedLicenceState(stateCollection, config);
+      if (!current) return reply.code(503).send({ error: 'LICENCE_UNAVAILABLE' });
+      if (current.decision.state === 'inactive' || current.decision.state === 'suspended') {
+        return reply.code(423).send({ error: 'LICENCE_INACTIVE' });
+      }
+      return reply.send({ saleDraftToken: createSaleDraftToken(user.shopId.toHexString(), config) });
+    });
   }
 
   return app;

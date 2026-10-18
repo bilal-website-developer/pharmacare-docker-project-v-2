@@ -10,7 +10,6 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
-    "seed:superadmin": "node dist/scripts/seed-superadmin.js",
     "seed:starter-catalog": "node dist/scripts/seed-starter-catalog.js",
     "seed:demo": "node dist/scripts/seed-demo.js",
     "lint": "tsc --noEmit -p tsconfig.json",
@@ -19,6 +18,8 @@
     "test:auth-crypto": "tsx --test src/auth-crypto.test.ts",
     "test:auth-routes": "tsx --test src/auth-routes.test.ts",
     "test:business-time": "tsx --test src/business-time.test.ts",
+    "test:licence": "tsx --test src/licence.test.ts",
+    "test:support-routes": "tsx --test src/support-routes.test.ts",
     "test:catalog": "tsx --test src/catalog.test.ts",
     "test:stock": "tsx --test src/stock.test.ts",
     "test:sales": "tsx --test src/sales.test.ts",
@@ -28,7 +29,7 @@
     "test:starter-catalog": "tsx --test src/starter-catalog.test.ts",
     "test:demo-seed": "tsx --test src/demo-seed.test.ts",
     "test:mongo-integration": "node --test integration/mongo.integration.mjs",
-    "test": "npm run test:config && npm run test:app && npm run test:auth-crypto && npm run test:auth-routes && npm run test:business-time && npm run test:catalog && npm run test:stock && npm run test:sales && npm run test:policy && npm run test:user-routes && npm run test:security && npm run test:starter-catalog && npm run test:demo-seed && npm run test:mongo-integration"
+    "test": "npm run test:config && npm run test:app && npm run test:auth-crypto && npm run test:auth-routes && npm run test:business-time && npm run test:licence && npm run test:support-routes && npm run test:catalog && npm run test:stock && npm run test:sales && npm run test:policy && npm run test:user-routes && npm run test:security && npm run test:starter-catalog && npm run test:demo-seed && npm run test:mongo-integration"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

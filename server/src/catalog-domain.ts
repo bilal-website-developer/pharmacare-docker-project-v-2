@@ -154,7 +154,7 @@ export function generateInternalEan13(randomTwelveDigits: string): string {
 }
 
 export function canViewCost(role: string, permissions: readonly string[]): boolean {
-  if (role === 'admin' || role === 'super_admin') return true;
+  if (role === 'admin') return true;
   if (role === 'manager') {
     return permissions.some((permission) =>
       ['products', 'stock_inventory', 'purchases', 'purchase_history'].includes(permission),

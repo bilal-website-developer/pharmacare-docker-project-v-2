@@ -27,11 +27,11 @@ async function main(): Promise<void> {
     if (!shop) throw new Error('STARTER_CATALOG_SHOP_NOT_FOUND');
     const actor = await database.collection('users').findOne({
       shopId: shop._id,
-      role: 'super_admin',
+      role: 'admin',
       isActive: true,
       deletedAt: null,
     }, { projection: { _id: 1 } });
-    if (!actor) throw new Error('STARTER_CATALOG_SUPER_ADMIN_REQUIRED');
+    if (!actor) throw new Error('STARTER_CATALOG_ADMIN_REQUIRED');
 
     const result = await importStarterCatalog(
       client,

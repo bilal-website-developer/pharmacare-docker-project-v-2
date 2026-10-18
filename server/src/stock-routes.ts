@@ -364,7 +364,7 @@ export function registerStockRoutes(
   app.post('/api/purchases/:id/void', {
     preHandler: [
       requireAuth(authRepository, tokenConfig, idempotencyStore),
-      requireRole('admin', 'super_admin'),
+      requireRole('admin'),
       requirePermission('purchases'),
     ],
   }, async (request, reply) => {

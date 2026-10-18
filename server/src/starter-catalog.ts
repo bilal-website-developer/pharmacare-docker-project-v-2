@@ -97,10 +97,10 @@ export async function importStarterCatalog(
       );
       if (!shop) throw new Error('STARTER_CATALOG_SHOP_NOT_FOUND');
       const actor = await database.collection<UserRecord>('users').findOne(
-        { _id: actorId, shopId, role: 'super_admin', isActive: true, deletedAt: null },
+        { _id: actorId, shopId, role: 'admin', isActive: true, deletedAt: null },
         { session },
       );
-      if (!actor) throw new Error('STARTER_CATALOG_SUPER_ADMIN_REQUIRED');
+      if (!actor) throw new Error('STARTER_CATALOG_ADMIN_REQUIRED');
 
       const audits: AuditRecord[] = [];
       const result: StarterCatalogImportResult = {

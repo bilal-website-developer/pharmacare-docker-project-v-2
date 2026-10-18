@@ -200,6 +200,7 @@ function errorResponse(error: unknown, reply: FastifyReply): FastifyReply | null
     STOCK_CHANGED_CONCURRENTLY: { status: 409, code: 'STOCK_CHANGED_CONCURRENTLY' },
     INSUFFICIENT_SELLABLE_STOCK: { status: 409, code: 'INSUFFICIENT_STOCK' },
     SALE_NUMBER_CONFLICT: { status: 409, code: 'SALE_NUMBER_CONFLICT' },
+    SALE_DRAFT_ALREADY_COMPLETED: { status: 409, code: 'SALE_DRAFT_ALREADY_COMPLETED' },
     NUMBER_SEQUENCE_UNAVAILABLE: { status: 500, code: 'INTERNAL_ERROR' },
   };
   const response = responses[error.message];

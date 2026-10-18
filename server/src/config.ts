@@ -3,9 +3,22 @@ import { z } from 'zod';
 
 const configSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  APP_VERSION: z.string().trim().min(1).max(80).default('0.1.0'),
   HOST: z.string().min(1).default('0.0.0.0'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   WEB_ORIGIN: z.string().url().optional(),
+  CONTROL_PLANE_URL: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().url().optional(),
+  ),
+  LICENCE_PUBLIC_KEY: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().min(1).optional(),
+  ),
+  SUPPORT_TOKEN_PUBLIC_KEY: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().min(1).optional(),
+  ),
   MONGO_HOST: z.string().min(1),
   MONGO_PORT: z.coerce.number().int().min(1).max(65535).default(27017),
   MONGO_APP_DB: z.string().regex(/^[A-Za-z0-9_-]{1,63}$/),
@@ -26,11 +39,15 @@ const configSchema = z.object({
 
 export type AppConfig = {
   nodeEnv: 'development' | 'test' | 'production';
+  appVersion: string;
   host: string;
   port: number;
   mongoUri: string;
   mongoDbName: string;
   webOrigin: string;
+  controlPlaneUrl: string | null;
+  licencePublicKey: string | null;
+  supportTokenPublicKey: string | null;
   accessTokenSecret: string;
   refreshTokenPepper: string;
   accessTokenTtlSeconds: number;
@@ -88,11 +105,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   return {
     nodeEnv: values.NODE_ENV,
+    appVersion: values.APP_VERSION,
     host: values.HOST,
     port: values.PORT,
     mongoUri: `mongodb://${username}:${password}@${values.MONGO_HOST}:${values.MONGO_PORT}/${values.MONGO_APP_DB}?authSource=${values.MONGO_APP_DB}&replicaSet=rs0`,
     mongoDbName: values.MONGO_APP_DB,
     webOrigin,
+    controlPlaneUrl: values.CONTROL_PLANE_URL?.replace(/\/+$/, '') ?? null,
+    licencePublicKey: values.LICENCE_PUBLIC_KEY ?? null,
+    supportTokenPublicKey: values.SUPPORT_TOKEN_PUBLIC_KEY ?? null,
     accessTokenSecret: values.JWT_ACCESS_SECRET,
     refreshTokenPepper: values.REFRESH_TOKEN_PEPPER,
     accessTokenTtlSeconds: 15 * 60,

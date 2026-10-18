@@ -109,6 +109,17 @@ const AUTHENTICATED_SELF_SERVICE = new Set([
   'POST:/api/auth/refresh',
   'POST:/api/auth/logout',
   'POST:/api/auth/password',
+  'GET:/api/licence/status',
+  'HEAD:/api/licence/status',
+  'GET:/api/sales/draft-token',
+  'HEAD:/api/sales/draft-token',
+]);
+const SUPPORT_TOKEN_ROUTES = new Set([
+  'GET:/api/support/diagnostics',
+  'HEAD:/api/support/diagnostics',
+  'GET:/api/support/read-only',
+  'HEAD:/api/support/read-only',
+  'POST:/api/support/admin-actions',
 ]);
 
 test('every registered protected API route rejects requests without a token', async () => {
@@ -146,7 +157,8 @@ test('protected business API routes deny a cashier without the required permissi
       && !route.url.startsWith(AUTH_ROUTE_TEST_PREFIX)
       && route.method !== 'OPTIONS'
       && !PUBLIC_ROUTE_PREFIXES.includes(`${route.method}:${route.url}`)
-      && !AUTHENTICATED_SELF_SERVICE.has(`${route.method}:${route.url}`),
+      && !AUTHENTICATED_SELF_SERVICE.has(`${route.method}:${route.url}`)
+      && !SUPPORT_TOKEN_ROUTES.has(`${route.method}:${route.url}`),
     );
     assert.ok(routes.length > 0);
     for (const route of routes) {

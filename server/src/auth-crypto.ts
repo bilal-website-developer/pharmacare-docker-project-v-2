@@ -10,7 +10,7 @@ const claimsSchema = z.object({
   aud: z.literal(audience),
   sub: z.string().regex(/^[a-f\d]{24}$/i),
   shopId: z.string().regex(/^[a-f\d]{24}$/i),
-  role: z.enum(['cashier', 'manager', 'accountant', 'admin', 'super_admin']),
+  role: z.enum(['cashier', 'manager', 'accountant', 'admin']),
   iat: z.number().int().nonnegative(),
   exp: z.number().int().positive(),
   jti: z.string().min(16),

@@ -44,7 +44,7 @@ function dummyHash(): Promise<string> {
 }
 
 function safePermissions(user: UserRecord): PermissionKey[] {
-  if (user.role === 'super_admin') return [...MODULE_KEYS];
+  if (user.role === 'admin') return [...MODULE_KEYS];
   return user.permissions.filter((permission) => permissionSchema.safeParse(permission).success);
 }
 
@@ -184,7 +184,7 @@ export function requirePermission(permission: PermissionKey) {
       return;
     }
     const permissions: readonly PermissionKey[] =
-      request.authUser.role === 'admin' || request.authUser.role === 'super_admin'
+      request.authUser.role === 'admin'
       ? [
         ...MODULE_KEYS,
         ...safePermissions(request.authUser).filter((permission) =>
