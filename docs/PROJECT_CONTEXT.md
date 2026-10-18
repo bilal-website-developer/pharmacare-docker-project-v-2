@@ -6,7 +6,7 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/mongo-migration`, a Node 22/Fastify/MongoDB API and Docker packaging coexist with the legacy Supabase implementation. Phases 0–9 have local test evidence; Phase 8 browser acceptance remains open. Phase 10 has a locally rehearsed Mongo archive/restore path and an undeployed Caddy production overlay; production acceptance remains open. Phase 11 has an opt-in, guarded demo seed and a manual acceptance plan; neither has been run through human browser acceptance. Phase 12 has a preparation-only checklist; execution remains unstarted.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/control-plane`, a Node 22/Fastify/MongoDB API and Docker packaging coexist with the legacy Supabase implementation. Control-plane steps 1–8 are locally implemented; steps 9–14 remain incomplete. The Supabase-backed product paths and all shop hardware/production acceptance remain unverified.
 
 - Latest modules: Products, Stock Inventory, and Trash Bin use typed API adapters; the Vite proxy targets Compose API `:3000` by default with a `VITE_API_PROXY_TARGET` override for host Fastify `:3001`. Supabase fallback remains available.
 
@@ -38,8 +38,9 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - `src/components/ManageUsersView.tsx`, `src/permissions.tsx`, `src/utils/auth.ts`: staff, roles, UI permission checks, and profile/auth helpers.
 - Other feature screens in `src/components/` include Dashboard, Reports, Suppliers, Cash Book, Controlled Drugs, Master Data, and print-request administration.
 - `src/utils/`, `src/types/`, `src/data/`: reusable logic, TypeScript domain shapes, API data adapters, and mock pharmacy data.
+- `control-plane/`: Postgres migrations and SQL checks plus the shared Supabase Edge Function router, support session operations and fake-store tests; no live project is configured.
 - `supabase/migrations/`, `supabase/functions/`, `supabase/baseline/`: database migrations, Edge Functions, and a supplied schema snapshot.
-- `server/`: Fastify/TypeScript API, MongoDB replica-set initializer, auth/user/catalog/purchase/stock/sales/customer/Phase 7/setup routes, transaction repositories, first-run Super Admin CLI, fictional starter catalog and guarded demo seed CLIs/data, and a Compose-only real-Mongo test runner.
+- `server/`: Fastify/TypeScript API, MongoDB replica-set initializer, auth/user/catalog/purchase/stock/sales/customer/Phase 7/setup/support routes, signed licence state/heartbeat/write guard, transactional legacy-role migration, fictional starter catalog and guarded demo seed CLIs/data, and a Compose real-Mongo test runner.
 - `docker/`, `docker-compose.yml`, `docker-compose.prod.yml`, `Dockerfile`: local Mongo/API/web container setup, scheduled backup and scratch restore services, loopback-only installer, and Caddy/Nginx configuration. See `docs/DOCKER.md`, `docs/INSTALLER.md`, and `docs/DEPLOYMENT.md`.
 - `docs/`: database references, `MASTER_PLAN.md`, `MULTI_SHOP_FULL_PLAN.md`, execution progress, redesign notes, and this context.
 - `scripts/`, `.githooks/`: context generation and commit-hook tooling.
@@ -50,6 +51,8 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - Supabase Auth/Postgres: shared across clients connected to the same configured project. Products, Stock Inventory, and purchase workflows use server RPCs; Suppliers still has direct table reads/writes. Authorization and persistence are not uniform across every screen.
 - Supabase Edge Functions: the `manage-users` function exists; print approval, requester-name listing, audited receipt-only modification, and profile Trash Bin events use database RPCs/Edge Functions.
 - Browser `localStorage`: UI-only preferences, saved inventory views, purchase drafts, per-user stock-alert keys seen, and other device settings. API-mode shop identity, memo settings, and receipt settings are server-backed.
+- Mongo `controlPlaneState`: the shop's control-plane shop ID, device-key hash, public signed licence, connection last-seen time and suspension status. Raw device keys are not persisted. Heartbeats send app version and aggregate user/product/sale/purchase counts only.
+- Mongo `supportSessions`: local shop/user IDs, control-plane session ID, scope, approval/expiry/end timestamps, and hashes of the one-time support code and first accepted signed token. Raw support codes/tokens are not persisted in the session record or the API idempotency cache. Support audit events are stored in the local audit log.
 - Mixed persistence: `VITE_BACKEND=supabase` retains the legacy Supabase behavior. API-mode adapters cover auth/session, Stock Alerts, Products/Stock Inventory, Suppliers, POS catalog/sales, Settings, Customer Ledger/Sales History, Master Data, Cash Book/expenses, Print Requests, Manage Users, Returns, Purchases/History, Dashboard/Business Analytics, and Trash Bin. Barcode labels and sale/payment/return receipts use safe API-fed DTOs and local HTML renderers. Manual UI and production acceptance remain unverified.
 - Demo fixture seeding is available only in `NODE_ENV=development|test`, with `DEMO_MODE=true` and an app database ending in `-demo` or `_demo`; the Compose runner defaults to production mode. Fixtures contain no stock batches; use the purchase module to create saleable stock. See `docs/MANUAL_TEST_PLAN.md`.
 - Other storage: unknown; no general file/object-storage workflow is established by the checked-in frontend docs.
@@ -59,13 +62,13 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 
 ## Roles and permissions
 
-Role names in `src/types/pharmacy.ts`: `admin`, `super_admin`, `manager`, `cashier`, `accountant`.
+Role names in `src/types/pharmacy.ts`: `admin`, `manager`, `cashier`, `accountant`. Legacy `super_admin` records are transactionally converted to `admin` at API startup and audited; the old role literal remains only in that migration.
 
 Frontend permission keys in `src/permissions.tsx`: `pos`, `products`, `categories`, `suppliers`, `customers`, `sales_history`, `purchase_history`, `purchases`, `expenses`, `stock_inventory`, `reports`, `manage_users`, plus POS print toggles `pos_print_sale` and `pos_print_payment`. The new API additionally allows `stock_alerts` to meet the migration contract.
 
-UI defaults: Admin and Super Admin get every module. Manager gets POS, Products, Categories, Suppliers, Customers, Sales History, Purchase History, Purchases, Stock Inventory, and Reports. Cashier gets POS and Customers. Accountant gets Customers, Suppliers, Sales History, Purchase History, Expenses, and Reports. Non-admin permissions can be configured; admin roles use their full defaults. Dashboard/help and personal print requests are available to all in the UI; Settings, Trash Bin, and print-request administration are admin-only. UI checks do not replace database/server authorization.
+UI defaults: Admin gets every module. Manager gets POS, Products, Categories, Suppliers, Customers, Sales History, Purchase History, Purchases, Stock Inventory, and Reports. Cashier gets POS and Customers. Accountant gets Customers, Suppliers, Sales History, Purchase History, Expenses, and Reports. Non-admin permissions can be configured; admin has full defaults. Dashboard/help and personal print requests are available to all in the UI; Settings, Trash Bin, and print-request administration are admin-only. UI checks do not replace database/server authorization.
 
-Cost visibility decision: Admin and Super Admin may view cost; Manager may view it only with at least one of `products`, `stock_inventory`, `purchases`, or `purchase_history`; Accountant may view it read-only through `purchase_history` or `reports`; Cashier never may. There is no Pharmacist role in the current app. The server rule exists in migrations; its effective production definition and table grants still require live verification.
+Cost visibility decision: Admin may view cost; Manager may view it only with at least one of `products`, `stock_inventory`, `purchases`, or `purchase_history`; Accountant may view it read-only through `purchase_history` or `reports`; Cashier never may. There is no Pharmacist role in the current app. The server rule exists in migrations; its effective production definition and table grants still require live verification.
 
 ## Business rules
 
@@ -74,6 +77,7 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - Expiry is a stock-batch field, not a medicine/product-master field. Product setup does not require expiry, but every purchase batch currently requires a future expiry date; no-expiry batches are not supported by the schema or sale/alert rules.
 - Per-shop IANA timezones default to `Asia/Karachi`; sales and stock expiry/status/alert calculations receive one shop-local “today” value. The Karachi midnight boundary is tested at 19:00 UTC, including the local Mongo integration setup.
 - Do not permit negative stock. Conditional stock updates and replica-set concurrency tests cover the API path; production operation remains unverified.
+- The signed local licence state machine governs renewal notice, warning, inactivity and suspension. The server blocks new sales, purchases and stock mutations when inactive/suspended, except a one-time server-issued sale-draft token opened before inactivity remains valid for up to 60 minutes. Offline time only raises a warning. Real control-plane synchronization remains unverified.
 - Stock alerts use sellable stock from positive, unexpired (`expiry_date >= current_date`), `ACTIVE`/`NEAR_EXPIRY` batches for active medicines. Alert low/out counts require `min_stock_alert > 0`; the alert RPC returns no cost, MRP, supplier, or cost-derived value and is available to every active, non-deleted profile regardless of module permission. The existing Products `out_of_stock` KPI does not apply the positive-reorder-threshold condition, so its count may exceed alert out counts. Owner-supplied live results show `stock_alerts_summary` exists with anon EXECUTE false/authenticated true; no migration-history result or end-to-end behavior was supplied.
 - Cost and profit/margin are internal data, not Pharmacy Memo print fields. Receipt rendering displays sale amounts/totals and is styled black on white. Do not add cost, purchase price, profit, or margin to customer-facing slips.
 - Cost-bearing base tables stay inaccessible to `anon` and `authenticated`; read cost only through permission-checked RPCs. Do not grant direct `SELECT` on `stock_batches`, because its RLS read policy includes `pos` and exposes all selectable columns to Cashier.
@@ -94,14 +98,16 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 - Date: 2026-10-12 — Cost access is role-and-permission scoped by `can_view_cost()`; Cashier is always denied, Accountants are read-only, and Manager access requires a relevant module permission. Verify the deployed function and table grants in Supabase.
 - Date: 2026-10-09 — Pharmacy Memo uses a shared sanitized renderer for 58mm/80mm and A4; template and paper preferences remain browser-local because shared settings storage is not implemented.
 - Date: 2026-10-14 — Phase 5b adds Mongo replica-set integration tests and hashed, shop/route-scoped idempotency for authenticated business writes. Login/refresh/logout are excluded; idempotency completion is not atomic with the business transaction, so a post-commit process crash can strand a key as PROCESSING for up to 24 hours. Owner selected per-shop IANA timezones defaulting to `Asia/Karachi`.
+- Date: 2026-10-18 — Control-plane steps 1–4 are locally implemented on `feature/control-plane`: private RLS schema/functions, Ed25519 licence verification/state machine, role migration, activation setup, six-hour heartbeat and server-side inactive-mode enforcement. Evidence and remaining verification are in `docs/CONTROL_PLANE_STATE.md`; no live Supabase credentials/project were used.
 
 ## Current status
 
-- **Current checkout:** `feature/mongo-migration`. Phase 8 API coverage and Phase 9 local verification evidence are tracked in `docs/MONGO_MIGRATION.md`; manual UI and production security acceptance remain outstanding.
-- **New design phase:** this session adds `docs/CONTROL_PLANE_DESIGN.md` and `docs/CONTROL_PLANE_DECISIONS.md` as a Phase A plan. These files are design-only and do not implement or deploy a live control plane. Owner approval is still required before any code changes begin.
+- **Current checkout:** `feature/control-plane`. Phase 8 API coverage and Phase 9 local verification evidence are tracked in `docs/MONGO_MIGRATION.md`; manual UI and production security acceptance remain outstanding.
+- **Control plane:** steps 1–8 are locally implemented; steps 9–14 are incomplete. `docs/CONTROL_PLANE_STATE.md` contains per-step status and current evidence. No real Supabase project has been accessed.
 - The Supabase implementation remains intact as the alternate backend. Owner-reported migration/ACL state and source-only barcode/Trash Bin changes are historical context, not live verification; do not run Supabase operations as part of the Mongo migration.
 - Existing UI behavior includes POS split tender, customer credit, cashier print requests, audited receipt-only print edits, role-based cost visibility, barcode/label workflows, stock alerts, and Trash Bin; API-mode adapters are implemented while manual acceptance remains pending.
 - Security and runtime gates still open: public production CORS/TLS and Mongo rate-limit load behavior, off-host backup, production deployment, human API-mode acceptance, and manual demo-shop testing. A local scratch restore rehearsal passed, but no production restore was done. Local security checks are recorded in `docs/MONGO_SECURITY_REPORT.md`; no penetration test was performed. The Phase 12 checklist is preparation only; keep Supabase code and migrations untouched until separate owner approval.
+- Support endpoints validate Ed25519 tokens and scopes locally. Only diagnostics/aggregate reporting and licence refresh are implemented; a direct support relay, full read-only screens, password reset, backup trigger and service restart remain unimplemented. `SUPPORT_TOKEN_PUBLIC_KEY` must be configured from the matching public key before support tokens can be accepted.
 
 ## Known issues and Later
 
@@ -118,7 +124,10 @@ Cost visibility decision: Admin and Super Admin may view cost; Manager may view 
 
 ## Changelog
 
-- 2026-10-18 — Added a Phase A control-plane design packet: `docs/CONTROL_PLANE_DESIGN.md` and `docs/CONTROL_PLANE_DECISIONS.md`. This is a plan-only artifact; no application code or deployment changes were made.
+- 2026-10-18 — Continued control-plane work on the already-checked-out `feature/control-plane` branch, preserving the pre-existing dirty worktree. Step 8 release bundle build completed; all four image scans passed, and scanner negative checks rejected a synthetic JWT-like value and `.env.example`. Current validation: SQL migration/security checks 15 PASS notices; root tests 300 total (282 passed, 0 failed, 18 skipped); Mongo integration 18/18; direct Edge 8/8, licence 8/8, support 2/2, security 9/9, panel 2/2, setup 2/2; lint/build/panel build passed; `npm audit --omit=dev` reported 0 vulnerabilities. OpenSSL signing and steps 9–14 remain unverified/incomplete.
+- 2026-10-18 — Step 7 adds a standalone mint-themed developer panel at `control-plane/panel/`: Authenticator enrollment/challenge gates, server-checked AAL2/developer access, shop/licence administration, one-time activation-code display, audit and release workflows. Panel domain tests 2/2, Edge tests 8/8, lint and isolated panel build passed. Real Supabase Auth/RLS and browser acceptance remain unverified; step 8 is in progress.
+- 2026-10-18 — Step 6 shop UI/API wired: role-filtered licence banners and admin-only Allow Support UI with end-session flow; setup activation form reports per-field errors; shop Super Admin options remain removed. Security tests 9/9, app test 1/1, licence tests 8/8, support-route tests 2/2, lint and build passed. Browser/Playwright and real Supabase acceptance remain unverified; step 7 is in progress.
+- 2026-10-18 — Implemented control-plane steps 1–5 on `feature/control-plane`: nine RLS-protected tables and SQL checks; 13 Edge operations with Ed25519 licence and scoped support tokens; local support approval/end, hashed codes/tokens, scope enforcement, local audits and masked diagnostics; signed licence state, activation setup, aggregate heartbeat, and inactive-mode write guard. Server lint/build passed, support tests passed 8/8, and isolated Mongo integration passed 18/18 with 0 skipped. No live Supabase project was used.
 - 2026-10-17 — Phase 8 API transport failures now show a themed retry screen in API mode; retry restores the cookie-backed session. Client test 6/6, lint/build passed; browser/shop-PC recovery remains unverified.
 - 2026-10-17 — Added first-run setup status and wizard plus a one-transaction shop/Super Admin/settings/audit bootstrap guarded by expiring, hash-checked setup code. Setup batch root tests: 269 total (257 passed, 0 failed, 12 skipped); security tests 9/9; Compose Mongo integration 12/12; lint/build passed. Installer code generation/display and browser acceptance remain open.
 - 2026-10-17 — Added a 20-entry fictional starter catalog and Super Admin-only transactional/idempotent importer; new entries are inactive, zero-priced, and have no stock. Current root tests: 272 total (259 passed, 0 failed, 13 skipped); focused catalog tests 2/2; security 9/9; Compose Mongo 13/13; lint/build passed; runtime image contains all 20 entries. Production and shop-PC use remain unverified.
@@ -151,15 +160,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-18T13:41:23.954Z
+Generated at (UTC): 2026-10-18T18:58:07.425Z
 Git branch: feature/control-plane
 
 Last 5 commit subjects:
+- feat: add control-plane schema and RLS tests
 - docs: control plane design
 - docs: control plane design
 - docs: record final local acceptance checks
 - docs: record clean installer verification
-- fix: pass shop slug into Docker API
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 

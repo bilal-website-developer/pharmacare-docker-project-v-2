@@ -125,7 +125,16 @@ $originalLocation = Get-Location
 try {
     Set-Location $repoRoot
     Invoke-Compose -Arguments @('config', '--quiet')
-    Invoke-Compose -Arguments @('build')
+    $bundledImages = Join-Path $repoRoot 'images.tar'
+    if (Test-Path -LiteralPath $bundledImages -PathType Leaf) {
+        & docker load --input $bundledImages
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Could not load the bundled Docker images.'
+        }
+    }
+    else {
+        Invoke-Compose -Arguments @('build')
+    }
     Invoke-Compose -Arguments @('up', '--detach')
 
     $deadline = [DateTimeOffset]::UtcNow.AddMinutes(5)
