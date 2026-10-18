@@ -160,15 +160,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-18T18:58:07.425Z
+Generated at (UTC): 2026-10-18T18:59:07.926Z
 Git branch: feature/control-plane
 
 Last 5 commit subjects:
+- Add signed release bundle tooling
 - feat: add control-plane schema and RLS tests
 - docs: control plane design
 - docs: control plane design
 - docs: record final local acceptance checks
-- docs: record clean installer verification
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 
