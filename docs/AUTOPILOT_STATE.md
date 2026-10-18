@@ -2,23 +2,26 @@
 
 ## Current position
 
-> Current position: first-run setup is committed as `029ee9e`; starter catalog is committed as `67c68d9`; installer batch is committed as `d6207f1`; Phase 10 backup/production config is committed as `4f8993c`; Phase 11 demo seed/manual plan is committed as `dfff34a`. Phase 12 preparation is now written; manual/browser acceptance, production operations, and cut-over execution remain outstanding.
+> Current position: Step 1 verification rerun completed on 2026-10-18. Root lint/build passed; root tests 278 total (265 passed, 0 failed, 13 skipped); server security 9/9; Compose Mongo integration 13/13; local health returned `{"status":"ok","database":"ok"}`. A stale web container was recreated to apply the declared loopback-only bind. Next: authorized branch push, then clean-install verification in `E:\ShopTest`.
 
 - Branch: `feature/mongo-migration`.
 - Recent commits: `e7dce1e` housekeeping, `9d3f0bb` admin audit-log endpoint, `d661142` API-unavailable retry screen, `029ee9e` first-run setup, `67c68d9` starter catalog.
-- Current uncommitted worktree is the Phase 12 documentation batch; Phases 10 and 11 are committed.
-- No `.env` values were read or printed; no existing Mongo data volume was deleted/reset; no Supabase files/data/schema, remote branches, or public services were changed. The local backup volume and empty Caddy volumes were created for validation.
+- Branch: `feature/mongo-migration`; latest code/document commits include Phase 10 `4f8993c`, Phase 11 `dfff34a`, and Phase 12 preparation `c47bef2`.
+- Step 1 found `.env` lacked the new backup credential names, causing Compose commands to fail before parsing. Ran `docker\add-backup-credentials.ps1`; it generated and stored a random backup credential without displaying values. Rebuilt/reran `mongo-init`, which logged readiness and index completion and exited 0.
+- `docker compose ps -a` showed Mongo healthy, API healthy, and `mongo-init` Exited (0). `curl.exe --silent --show-error --include http://localhost:8080/api/health` returned HTTP 200 and `{"status":"ok","database":"ok"}`.
+- The already-running web container was bound to `0.0.0.0:8080`, although current Compose declares `127.0.0.1:8080`. Ran `docker compose up --detach --force-recreate web`; `docker compose port web 80` then returned `127.0.0.1:8080`.
+- Tracked worktree was clean at step start. `.env` remains ignored. No `.env` values were displayed, no existing Mongo data volume was deleted/reset, and no Supabase data/schema or public service was changed.
 
 ## Current verification evidence
 
 | Command | Result |
 |---|---|
-| `npm.cmd test` | Phase 11: 278 total, 265 passed, 0 failed, 13 skipped |
+| `npm.cmd test` | 278 total, 265 passed, 0 failed, 13 skipped |
 | `npm.cmd run lint` | Passed |
 | `npm.cmd run build` | Passed; existing Vite `__dirname` and large-chunk warnings |
-| `npm.cmd --prefix server run test:security` | Phase 10 baseline: 9 passed, 0 failed, 0 skipped |
+| `npm.cmd --prefix server run test:security` | 9 passed, 0 failed, 0 skipped |
 | `npm.cmd --prefix server run test:starter-catalog` | Phase 10 baseline: 2 passed, 0 failed, 0 skipped |
-| `docker compose run --build --rm --no-deps api-test` | Phase 10 baseline: 13 passed, 0 failed, 0 skipped; not rerun for demo seed |
+| `docker compose run --build --rm --no-deps api-test` | 13 passed, 0 failed, 0 skipped |
 | `npm.cmd run test:demo-seed` | 3 passed, 0 failed, 0 skipped |
 | `docker compose config --quiet` with process-local fake required backup credentials | Passed |
 | `docker compose run --build --rm --no-deps --entrypoint node api -e "import('node:fs/promises').then(async ({readFile}) => { const rows = JSON.parse(await readFile('/app/data/starter-catalog.json', 'utf8')); console.log(JSON.stringify({starterCatalogEntries: rows.length})); })"` | Runtime image returned 20 entries |
