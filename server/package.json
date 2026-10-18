@@ -12,6 +12,7 @@
     "start": "node dist/index.js",
     "seed:superadmin": "node dist/scripts/seed-superadmin.js",
     "seed:starter-catalog": "node dist/scripts/seed-starter-catalog.js",
+    "seed:demo": "node dist/scripts/seed-demo.js",
     "lint": "tsc --noEmit -p tsconfig.json",
     "test:config": "tsx --test src/config.test.ts",
     "test:app": "tsx --test src/app.test.ts",
@@ -25,8 +26,9 @@
     "test:user-routes": "tsx --test src/user-routes.test.ts",
     "test:security": "tsx --test src/security.test.ts",
     "test:starter-catalog": "tsx --test src/starter-catalog.test.ts",
+    "test:demo-seed": "tsx --test src/demo-seed.test.ts",
     "test:mongo-integration": "node --test integration/mongo.integration.mjs",
-    "test": "npm run test:config && npm run test:app && npm run test:auth-crypto && npm run test:auth-routes && npm run test:business-time && npm run test:catalog && npm run test:stock && npm run test:sales && npm run test:policy && npm run test:user-routes && npm run test:security && npm run test:starter-catalog && npm run test:mongo-integration"
+    "test": "npm run test:config && npm run test:app && npm run test:auth-crypto && npm run test:auth-routes && npm run test:business-time && npm run test:catalog && npm run test:stock && npm run test:sales && npm run test:policy && npm run test:user-routes && npm run test:security && npm run test:starter-catalog && npm run test:demo-seed && npm run test:mongo-integration"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

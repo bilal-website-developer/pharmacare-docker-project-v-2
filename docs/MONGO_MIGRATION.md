@@ -19,8 +19,8 @@ This file tracks migration phase deliverables and verification. It does not auth
 | 8 | Frontend API client and module-by-module switch | API mode wired across tracked feature modules; transport-unavailable retry screen added; manual UI checks remain | Access tokens remain in memory and refresh cookies remain httpOnly; API errors are normalized; labels/receipts use allowlisted data and escaping. Supabase fallback remains. Browser acceptance and production runtime checks remain open. |
 | 9 | Security hardening | Local checks complete; production security acceptance open | [`MONGO_SECURITY_REPORT.md`](./MONGO_SECURITY_REPORT.md) records source/test, audit, Compose health, and CORS evidence. This is not a penetration test. |
 | 10 | Backups and production deployment | Local backup/restore rehearsal passed; production overlay written, not deployed | The replica-set backup produced a compressed archive; restore to an isolated tmpfs scratch Mongo matched collection counts. `docker-compose.prod.yml` and [`DEPLOYMENT.md`](./DEPLOYMENT.md) define Caddy/TLS and host operations. Public DNS, TLS issuance, firewall, off-host backup, and production acceptance remain unverified. |
-| 11 | Demo data and manual test plan | Not started | Demo-only seed and per-role manual test plan remain open. |
-| 12 | Cut-over and Supabase cleanup | Blocked on explicit approval after all manual tests pass | Never delete `supabase/` or migrations; cut-over plan requires owner approval. |
+| 11 | Demo data and manual test plan | Written; seed guard tests and project checks passed; human acceptance not run | `server/src/demo-seed.ts` seeds fictional `DEMO -` catalog/customer/supplier records transactionally and idempotently. It requires `NODE_ENV=development|test`, `DEMO_MODE=true`, and an app database ending in `demo`; it refuses to run otherwise. The fixtures intentionally have no opening stock, so use the purchase flow before POS cases. `docs/MANUAL_TEST_PLAN.md` covers all roles and workflows but has not been executed by a human. `npm.cmd test`: 278 total, 265 passed, 0 failed, 13 skipped; `npm.cmd run lint` and `npm.cmd run build` passed; `npm.cmd run test:demo-seed`: 3 passed, 0 failed, 0 skipped; `docker compose config --quiet` passed with temporary fake values for required backup credentials. |
+| 12 | Cut-over and Supabase cleanup | Not started | Preparation requires manual acceptance and separate owner approval. No Supabase file, migration, project, or data may be removed or changed without explicit approval. |
 
 ## Autopilot step 0 — housekeeping
 
@@ -64,6 +64,34 @@ Stock status refresh, stock batches, expiry buckets, stock alerts, sales, and pr
 
 Validation after the current fixes: `npm.cmd run lint` passed; `npm.cmd test` reported 244 tests, 233 passed, 0 failed, 11 skipped (the real-Mongo cases are skipped by the non-Compose runner); `npm.cmd run build` passed with the existing Vite `__dirname` and large-chunk warnings. The separately invoked Compose integration suite passed all 11 tests with 0 skips.
 - `docker compose up --detach --build api` rebuilt/restarted the API on the updated source. After startup, `docker compose ps --all` showed Mongo, API, and web healthy and mongo-init Exited (0); the proxied `/api/health` returned HTTP 200 with database `ok`. The initial request during API startup returned 502; the health check and retry after startup passed.
+
+## Autopilot step 7 — demo data and manual acceptance plan
+
+**Status: WRITTEN-UNVERIFIED for end-to-end acceptance.** Added an opt-in
+transactional, idempotent demo seed CLI and synthetic fixtures. The seed
+requires `NODE_ENV=development` or `test`, `DEMO_MODE=true`, and a Mongo app
+database named with a `-demo` or `_demo` suffix. It verifies the active shop and
+active Super Admin inside the transaction, rejects conflicting fixture names,
+and records a seed marker plus audit event. Fixtures use integer-paisa fields,
+explicit `DEMO -` names, fake-only contact details, and no stock batches or
+expiry dates. The demo runner defaults to production mode; an operator must
+deliberately configure an isolated demo environment. Never use this command on
+real shop data.
+
+`docs/MANUAL_TEST_PLAN.md` contains role-by-role and module-by-module browser
+acceptance steps, including POS/discounts/split tenders/controlled drugs,
+returns, voids, purchases, stock adjustments, expiry, labels/receipts, print
+requests, users, settings, cash reconciliation, and cost-leak checks. The plan
+is a checklist only; no human browser acceptance has been claimed.
+
+Validation for this step: `npm.cmd run lint` and `npm.cmd run build` exited 0;
+`npm.cmd test` reported 278 total, 265 passed, 0 failed, 13 skipped;
+`npm.cmd run test:demo-seed` reported 3 passed, 0 failed, 0 skipped; and
+`docker compose config --quiet` exited 0 with process-local fake values supplied
+for the required backup username/password. No `.env` values were printed, no
+demo seed was run against a database, and real-Mongo business integration
+tests were not rerun for the seed feature.
+
 
 ## Phase 1 verification and open items
 

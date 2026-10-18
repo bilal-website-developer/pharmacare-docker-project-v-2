@@ -126,6 +126,7 @@ services:
       REFRESH_TOKEN_PEPPER: ${REFRESH_TOKEN_PEPPER:?REFRESH_TOKEN_PEPPER is required}
       SETUP_CODE_HASH: ${SETUP_CODE_HASH:-}
       SETUP_CODE_EXPIRES_AT: ${SETUP_CODE_EXPIRES_AT:-}
+      DEMO_MODE: ${DEMO_MODE:-false}
     depends_on:
       mongo:
         condition: service_healthy
@@ -173,8 +174,37 @@ services:
         condition: service_completed_successfully
     networks:
       - database
+
+  demo-seed:
+    image: pharma-care-api:local
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    profiles: ["demo-seed"]
+    command: ["node", "dist/scripts/seed-demo.js"]
+    environment:
+      NODE_ENV: ${DEMO_NODE_ENV:-production}
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_APP_DB: ${MONGO_APP_DB:?MONGO_APP_DB is required}
+      MONGO_APP_USERNAME: ${MONGO_APP_USERNAME:?MONGO_APP_USERNAME is required}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD is required}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      REFRESH_TOKEN_PEPPER: ${REFRESH_TOKEN_PEPPER:?REFRESH_TOKEN_PEPPER is required}
+      BOOTSTRAP_SHOP_SLUG: ${BOOTSTRAP_SHOP_SLUG:-main}
+      DEMO_MODE: ${DEMO_MODE:-false}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    networks:
+      - database
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
 
   web:
     image: pharma-care-web:local

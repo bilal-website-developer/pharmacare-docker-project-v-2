@@ -84,6 +84,15 @@ Decisions recorded while finishing the migration. Revisit a decision only when n
 - **Alternatives:** Give the backup container the Mongo root credential; reuse the API credential; give the backup user cluster-wide `backup` privileges; store plaintext credentials in an image or archive volume.
 - **Reason:** Limit backup access to the one application database and avoid putting credentials in an image, persistent archive, command line, or logs. Existing installs must add the new credential and rerun `mongo-init`.
 
+## 2026-10-18
+
+### Demo seed isolation and initial stock
+
+- **Decision:** Permit the demo seed CLI only when `NODE_ENV` is `development` or `test`, `DEMO_MODE=true`, and `MONGO_APP_DB` ends in `-demo` or `_demo`. Require an active shop and active Super Admin in the seeding transaction. Seed only clearly named fictional catalog/customer/supplier records and no stock batches.
+- **Alternatives:** Permit production mode with an explicit flag; seed opening stock and synthetic purchases; allow demo records in a regular shop database.
+- **Reason:** A production-mode default and database-name suffix provide independent safeguards against accidental demo data in a real shop. With no opening stock, a tester must create stock through the normal purchase workflow before POS cases, exercising the real workflow rather than introducing unexplained inventory/cost/cash-book entries. Demo data is idempotent and conflicts abort rather than overwrite existing records.
+
+
 ### Restore rehearsal target and comparison
 
 - **Decision:** Restore archives only to the opt-in `mongo-restore-scratch` service, whose database uses tmpfs, with no published port or persistent volume. Compare per-collection counts while excluding only volatile `authRateLimits` and `requestRateLimits`, which can change due to rehearsal requests.

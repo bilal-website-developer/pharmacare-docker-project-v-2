@@ -105,6 +105,8 @@ $lines = @(
     "BOOTSTRAP_SHOP_SLUG=$slug"
     "SETUP_CODE_HASH=$setupCodeHash"
     "SETUP_CODE_EXPIRES_AT=$setupCodeExpiresAt"
+    'DEMO_MODE=false'
+    'DEMO_NODE_ENV=production'
     'VITE_SUPABASE_URL='
     'VITE_SUPABASE_ANON_KEY='
 )
