@@ -49,11 +49,13 @@
     "test:setup": "tsx --test src/data/setup.test.ts",
     "test:control-plane": "tsx --test control-plane/functions/router.test.ts",
     "test:control-plane-panel": "tsx --test control-plane/panel/panel-domain.test.ts",
+    "test:release-signature": "node --test scripts/release-signature.test.mjs",
+    "test:e2e": "playwright test",
     "control-plane:panel:dev": "vite --config control-plane/panel/vite.config.ts --host 127.0.0.1",
     "control-plane:panel:build": "vite build --config control-plane/panel/vite.config.ts",
     "test:server": "npm --prefix server test",
     "test:demo-seed": "npm --prefix server run test:demo-seed",
-    "test": "npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:finance && npm run test:business-reports && npm run test:products-api && npm run test:customer-ledger && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:master-data-api && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-requests-api && npm run test:manage-users-api && npm run test:sale-returns-api && npm run test:purchases-api && npm run test:print-request-editor && npm run test:trash-bin && npm run test:trash-bin-api && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:setup && npm run test:control-plane && npm run test:server && npm run test:demo-seed"
+    "test": "npm run test:fefo && npm run test:receipt && npm run test:inventory-ui && npm run test:stock-inventory && npm run test:inventory-products && npm run test:stock-alerts && npm run test:pos-catalog && npm run test:sales && npm run test:finance && npm run test:business-reports && npm run test:products-api && npm run test:customer-ledger && npm run test:shop-settings && npm run test:product-filters && npm run test:master-data && npm run test:master-data-api && npm run test:suppliers && npm run test:print-snapshot && npm run test:print-requests-api && npm run test:manage-users-api && npm run test:sale-returns-api && npm run test:purchases-api && npm run test:print-request-editor && npm run test:trash-bin && npm run test:trash-bin-api && npm run test:report && npm run test:discount && npm run test:barcode-scanner && npm run test:labels && npm run test:permissions && npm run test:manage-users-policy && npm run test:api-client && npm run test:setup && npm run test:control-plane && npm run test:release-signature && npm run test:server && npm run test:demo-seed"
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",
@@ -71,6 +73,7 @@
     "vite": "^8.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
