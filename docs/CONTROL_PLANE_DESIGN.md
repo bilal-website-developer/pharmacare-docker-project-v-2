@@ -1,6 +1,6 @@
 # Control Plane Design
 
-Status: Design basis for an implementation in progress. Steps 1-8 are implemented locally; step 9 (host updater) and steps 10-14 are not complete. Step 8's bundle build and image scan passed locally, but detached signing was not run because OpenSSL is unavailable. See `docs/CONTROL_PLANE_STATE.md` for current evidence and gaps. No real Supabase project has been configured.
+Status: Implementation remains local and incomplete. Schema through release bundle, host updater orchestration, LAN/restore scripts, and fake-control-plane Chromium tests exist. Host updater integration with activation-provisioned config, LAN with real Windows networking, isolated real-Mongo restore parity, remaining end-to-end requirements, and final acceptance are not verified. The signer uses Node's built-in Ed25519 and does not need OpenSSL. See `docs/CONTROL_PLANE_STATE.md` for exact evidence and gaps. No real Supabase project has been configured.
 
 ## 1. Scope and design intent
 

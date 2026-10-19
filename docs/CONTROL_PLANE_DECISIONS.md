@@ -12,6 +12,8 @@ Status: Active decision record. Implementation progress and test evidence are tr
 | D4 | Plan type and expiry are chosen by owner per shop | Approved | `monthly`, `yearly`, `one_time` |
 | D5 | Offline days and warning days are chosen by owner per shop | Approved | Validated server-side with limits |
 | D6 | A sale draft opened before inactivity may finish once within 60 minutes | Approved | The shop API issues an HMAC-authenticated draft token while sales are permitted; inactive-mode middleware enforces expiry/shop binding and the sale transaction consumes the token once. |
+| D7 | Updates run on the Windows host, not in a Docker socket container | Approved | The installer registers a daily 02:00 Scheduled Task. The host updater requires a verified backup, approved signed release, maintenance-window check, health/smoke checks, rollback, and two-version retention. Runtime control-plane configuration is not yet provisioned by first-run setup. |
+| D8 | LAN HTTPS uses an internal Caddy certificate and a Private-profile firewall rule | Approved | Mongo remains unpublished. The helper exports the internal root certificate for client trust; real Windows/two-client acceptance remains outstanding. |
 
 ---
 
