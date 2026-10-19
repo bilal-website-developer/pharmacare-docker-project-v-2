@@ -1,10 +1,11 @@
 [CmdletBinding()]
 param(
-    [string[]]$Image = @('pharma-care-api:local', 'pharma-care-web:local', 'mongo:8.0.12', 'nginx:1.27.5-alpine'),
+    [string[]]$Image = @('pharma-care-api:local', 'pharma-care-web:local', 'mongo:8.0.12', 'nginx:1.27.5-alpine', 'caddy:2.10-alpine'),
     [string]$ScanDirectory
 )
 
 $ErrorActionPreference = 'Stop'
+$Image = @($Image | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 
 $secretPatterns = @(
     @{ Name = 'Supabase URL'; Pattern = 'https?://[a-z0-9-]+\.supabase\.(?:co|in)\b' },

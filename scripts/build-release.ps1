@@ -36,12 +36,15 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not pull the pinned MongoDB image.' }
     & docker pull nginx:1.27.5-alpine
     if ($LASTEXITCODE -ne 0) { throw 'Could not pull the pinned Nginx image.' }
+    & docker pull caddy:2.10-alpine
+    if ($LASTEXITCODE -ne 0) { throw 'Could not pull the pinned Caddy image.' }
 
     $images = @(
         'pharma-care-api:local',
         'pharma-care-web:local',
         'mongo:8.0.12',
-        'nginx:1.27.5-alpine'
+        'nginx:1.27.5-alpine',
+        'caddy:2.10-alpine'
     )
     & (Join-Path $PSScriptRoot 'scan-images.ps1') -Image $images
     if ($LASTEXITCODE -ne 0) { throw 'Image secret scan failed; the bundle was not created.' }
@@ -51,14 +54,27 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not save release images.' }
 
     Copy-Item -LiteralPath (Join-Path $repoRoot 'docker-compose.yml') -Destination $releaseRoot
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'docker-compose.lan.yml') -Destination $releaseRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot 'docker') -Destination $releaseRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $repoRoot 'Dockerfile') -Destination $releaseRoot
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'installer') -Destination $releaseRoot -Recurse
+    $releaseScripts = Join-Path $releaseRoot 'scripts'
+    New-Item -ItemType Directory -Path $releaseScripts | Out-Null
+    foreach ($script in @(
+        'update.ps1',
+        'update-engine.ps1',
+        'release-signature.mjs',
+        'enable-lan.ps1',
+        'backup-external.ps1'
+    )) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $script) -Destination $releaseScripts
+    }
     $releaseServer = Join-Path $releaseRoot 'server'
     New-Item -ItemType Directory -Path $releaseServer | Out-Null
     Copy-Item -LiteralPath (Join-Path (Join-Path $repoRoot 'server') 'Dockerfile') -Destination $releaseServer
     $releaseDocs = Join-Path $releaseRoot 'docs'
     New-Item -ItemType Directory -Path $releaseDocs | Out-Null
-    foreach ($document in @('INSTALLER.md', 'DOCKER.md', 'DEPLOYMENT.md', 'SHOP_OWNER_GUIDE.md')) {
+    foreach ($document in @('INSTALLER.md', 'DOCKER.md', 'DEPLOYMENT.md', 'SHOP_OWNER_GUIDE.md', 'SUPPORT_RUNBOOK.md')) {
         $source = Join-Path (Join-Path $repoRoot 'docs') $document
         if (Test-Path -LiteralPath $source -PathType Leaf) {
             Copy-Item -LiteralPath $source -Destination $releaseDocs

@@ -6,7 +6,7 @@ Read this whole file before doing anything. If the code and this file disagree, 
 
 ## Project summary
 
-Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/control-plane`, a Node 22/Fastify/MongoDB API and Docker packaging coexist with the legacy Supabase implementation. Control-plane steps 1–8 are locally implemented; steps 9–14 remain incomplete. The Supabase-backed product paths and all shop hardware/production acceptance remain unverified.
+Pharma Care is a pharmacy point-of-sale (POS), inventory, purchasing, customer/accounting, and staff-management web app. On `feature/control-plane`, a Node 22/Fastify/MongoDB API and Docker packaging coexist with the legacy Supabase implementation. Control-plane schema through release tooling and local updater/LAN/restore scaffolding are present; updater provisioning and operational integration remain incomplete. Fake-control-plane Playwright tests pass in Chromium. The Supabase-backed product paths and shop hardware/production acceptance remain unverified.
 
 - Latest modules: Products, Stock Inventory, and Trash Bin use typed API adapters; the Vite proxy targets Compose API `:3000` by default with a `VITE_API_PROXY_TARGET` override for host Fastify `:3001`. Supabase fallback remains available.
 
@@ -44,6 +44,8 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - `docker/`, `docker-compose.yml`, `docker-compose.prod.yml`, `Dockerfile`: local Mongo/API/web container setup, scheduled backup and scratch restore services, loopback-only installer, and Caddy/Nginx configuration. See `docs/DOCKER.md`, `docs/INSTALLER.md`, and `docs/DEPLOYMENT.md`.
 - `docs/`: database references, `MASTER_PLAN.md`, `MULTI_SHOP_FULL_PLAN.md`, execution progress, redesign notes, and this context.
 - `scripts/`, `.githooks/`: context generation and commit-hook tooling.
+- `scripts/update.ps1`, `scripts/update-engine.ps1`, `installer/restore.ps1`, and `docker-compose.lan.yml`: host-side update orchestration, injected transaction tests, archive restore/external-copy helpers, and an optional internal-TLS LAN stack. Activation does not yet provision updater configuration; fake transaction tests are not a real Docker update rehearsal.
+- `e2e/`, `playwright.config.ts`: Chromium browser tests with intercepted local fake API routes; no live control plane is contacted.
 - `public/`: static assets and fonts.
 
 ## Data and storage
@@ -103,10 +105,10 @@ Cost visibility decision: Admin may view cost; Manager may view it only with at 
 ## Current status
 
 - **Current checkout:** `feature/control-plane`. Phase 8 API coverage and Phase 9 local verification evidence are tracked in `docs/MONGO_MIGRATION.md`; manual UI and production security acceptance remain outstanding.
-- **Control plane:** steps 1–8 are locally implemented; steps 9–14 are incomplete. `docs/CONTROL_PLANE_STATE.md` contains per-step status and current evidence. No real Supabase project has been accessed.
+- **Control plane:** steps 1–8 are locally implemented; updater, LAN, restore, E2E and owner-doc work for steps 9–14 is present, with live deployment and hardware acceptance still incomplete. Release scanning and Node built-in Ed25519 signing were exercised locally. Tests and evidence are in `docs/CONTROL_PLANE_STATE.md`. No real Supabase project has been accessed.
 - The Supabase implementation remains intact as the alternate backend. Owner-reported migration/ACL state and source-only barcode/Trash Bin changes are historical context, not live verification; do not run Supabase operations as part of the Mongo migration.
 - Existing UI behavior includes POS split tender, customer credit, cashier print requests, audited receipt-only print edits, role-based cost visibility, barcode/label workflows, stock alerts, and Trash Bin; API-mode adapters are implemented while manual acceptance remains pending.
-- Security and runtime gates still open: public production CORS/TLS and Mongo rate-limit load behavior, off-host backup, production deployment, human API-mode acceptance, and manual demo-shop testing. A local scratch restore rehearsal passed, but no production restore was done. Local security checks are recorded in `docs/MONGO_SECURITY_REPORT.md`; no penetration test was performed. The Phase 12 checklist is preparation only; keep Supabase code and migrations untouched until separate owner approval.
+- Security and runtime gates still open: public production CORS/TLS and Mongo rate-limit load behavior, off-host backup, production deployment, human API-mode acceptance, and manual demo-shop testing. External-folder copy and scratch restore/count parity passed with synthetic data in a unique disposable Mongo project; no off-host or production restore was done. A disposable LAN stack answered host HTTPS curl with certificate validation bypassed; Windows trust-store validation and a real shop login/cookie exchange remain open. Local security checks are recorded in `docs/MONGO_SECURITY_REPORT.md`; no penetration test was performed. The Phase 12 checklist is preparation only; keep Supabase code and migrations untouched until separate owner approval.
 - Support endpoints validate Ed25519 tokens and scopes locally. Only diagnostics/aggregate reporting and licence refresh are implemented; a direct support relay, full read-only screens, password reset, backup trigger and service restart remain unimplemented. `SUPPORT_TOKEN_PUBLIC_KEY` must be configured from the matching public key before support tokens can be accepted.
 
 ## Known issues and Later
@@ -124,6 +126,7 @@ Cost visibility decision: Admin may view cost; Manager may view it only with at 
 
 ## Changelog
 
+- 2026-10-19 — Continued control-plane work on `feature/control-plane`: reproduced scanner array-binding exit 1 and confirmed comma-separated invocation scans five images; signed/verified a temporary release with Node Ed25519 and rejected tampering/wrong key; exercised fake updater success/rollback/tamper/retry (4/4); copied an external Mongo backup and matched scratch restore collection counts in a unique disposable project; validated Caddy and LAN HTTPS health with host curl. Root tests: 301 total (283 passed, 0 failed, 18 skipped); isolated Mongo integration 18/18; real Chromium E2E 7/7; lint, API/web and panel builds passed; audit 0 vulnerabilities. The browser cookie test uses a fake HTTPS origin; Windows Schannel CA trust, real shop cookie exchange, live Supabase, actual updater deployment, off-host/production DR and hardware acceptance remain unverified. No push.
 - 2026-10-18 — Continued control-plane work on the already-checked-out `feature/control-plane` branch, preserving the pre-existing dirty worktree. Step 8 release bundle build completed; all four image scans passed, and scanner negative checks rejected a synthetic JWT-like value and `.env.example`. Current validation: SQL migration/security checks 15 PASS notices; root tests 300 total (282 passed, 0 failed, 18 skipped); Mongo integration 18/18; direct Edge 8/8, licence 8/8, support 2/2, security 9/9, panel 2/2, setup 2/2; lint/build/panel build passed; `npm audit --omit=dev` reported 0 vulnerabilities. OpenSSL signing and steps 9–14 remain unverified/incomplete.
 - 2026-10-18 — Step 7 adds a standalone mint-themed developer panel at `control-plane/panel/`: Authenticator enrollment/challenge gates, server-checked AAL2/developer access, shop/licence administration, one-time activation-code display, audit and release workflows. Panel domain tests 2/2, Edge tests 8/8, lint and isolated panel build passed. Real Supabase Auth/RLS and browser acceptance remain unverified; step 8 is in progress.
 - 2026-10-18 — Step 6 shop UI/API wired: role-filtered licence banners and admin-only Allow Support UI with end-session flow; setup activation form reports per-field errors; shop Super Admin options remain removed. Security tests 9/9, app test 1/1, licence tests 8/8, support-route tests 2/2, lint and build passed. Browser/Playwright and real Supabase acceptance remain unverified; step 7 is in progress.
@@ -159,16 +162,18 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 
 - Keep messages short and seek approval for large multi-file changes; keep claims grounded in code/docs and write **unknown** where verification is missing. Updating this file needs no permission.
 
+- 2026-10-19 — Replaced OpenSSL-dependent release signing with Node built-in Ed25519 and tested valid/tampered/wrong-key cases. Added host updater, Scheduled Task registration, LAN/restore helpers, owner/support guides, and six passing fake-control-plane Chromium tests. Final local root tests: 301 total (283 passed, 0 failed, 18 skipped); unique-project API integration 18/18; lint/build/panel build/audit passed (0 vulnerabilities). Updater rollback is fake-operation tested only; activation config provisioning, real Docker update/restore, HTTPS cookie/firewall, complete E2E export sweep, live Supabase, and hardware acceptance remain unverified. See `docs/CONTROL_PLANE_STATE.md`.
+
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-18T18:59:55.264Z
+Generated at (UTC): 2026-10-19T18:00:03.199Z
 Git branch: feature/control-plane
 
 Last 5 commit subjects:
+- Document control-plane progress and decisions
 - Add shop licence and support UI
 - Enforce shop licensing and scoped support
 - Add control-plane services and developer panel
 - Add signed release bundle tooling
-- feat: add control-plane schema and RLS tests
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 
