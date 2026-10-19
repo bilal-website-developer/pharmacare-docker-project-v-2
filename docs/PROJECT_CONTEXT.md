@@ -165,15 +165,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - 2026-10-19 — Replaced OpenSSL-dependent release signing with Node built-in Ed25519 and tested valid/tampered/wrong-key cases. Added host updater, Scheduled Task registration, LAN/restore helpers, owner/support guides, and six passing fake-control-plane Chromium tests. Final local root tests: 301 total (283 passed, 0 failed, 18 skipped); unique-project API integration 18/18; lint/build/panel build/audit passed (0 vulnerabilities). Updater rollback is fake-operation tested only; activation config provisioning, real Docker update/restore, HTTPS cookie/firewall, complete E2E export sweep, live Supabase, and hardware acceptance remain unverified. See `docs/CONTROL_PLANE_STATE.md`.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-19T18:00:03.199Z
+Generated at (UTC): 2026-10-19T18:02:47.282Z
 Git branch: feature/control-plane
 
 Last 5 commit subjects:
+- Add Node Ed25519 release signing and scanner fixes
 - Document control-plane progress and decisions
 - Add shop licence and support UI
 - Enforce shop licensing and scoped support
 - Add control-plane services and developer panel
-- Add signed release bundle tooling
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 

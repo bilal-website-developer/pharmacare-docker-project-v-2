@@ -159,7 +159,24 @@ try {
     if ($setupStatus.needsSetup -ne $true) {
         throw 'The configured database already contains a shop; the first-run setup code was not consumed.'
     }
+
+    $updaterPath = Join-Path $repoRoot 'scripts\update.ps1'
+    if (-not (Test-Path -LiteralPath $updaterPath -PathType Leaf)) {
+        throw 'The host updater script is missing from this installation bundle.'
+    }
+    $taskName = "PharmaCare-AutoUpdate-$projectSlug"
+    $powerShellPath = (Get-Command powershell.exe -ErrorAction Stop).Source
+    $taskAction = New-ScheduledTaskAction -Execute $powerShellPath -Argument (
+        "-NoProfile -ExecutionPolicy Bypass -File `"$updaterPath`""
+    )
+    $taskTrigger = New-ScheduledTaskTrigger -Daily -At '2:00AM'
+    $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable `
+        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger `
+        -Settings $taskSettings -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
+
     Invoke-Compose -Arguments @('ps')
+    Write-Host "Created daily host updater task: $taskName (02:00 local time)."
     Write-Host 'Local shop services are healthy. Open http://localhost:8080 and complete the first-run wizard.'
 }
 finally {
