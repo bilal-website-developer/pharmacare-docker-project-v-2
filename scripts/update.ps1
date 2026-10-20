@@ -1,30 +1,43 @@
 [CmdletBinding()]
 param(
     [switch]$UpdateNow,
-    [string]$ConfigPath = 'updates\update-config.json',
-    [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot)
+    [string]$ConfigPath,
+    [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
+    [string]$UpdatesDirectoryPath,
+    [ValidateRange(1, 900)][int]$HealthCheckTimeoutSeconds = 180
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'update-engine.ps1')
 
 $root = (Resolve-Path -LiteralPath $RepositoryRoot).Path
-$configFile = if ([System.IO.Path]::IsPathRooted($ConfigPath)) {
-    $ConfigPath
+$updatesRoot = if ($UpdatesDirectoryPath) {
+    if ([System.IO.Path]::IsPathRooted($UpdatesDirectoryPath)) {
+        [System.IO.Path]::GetFullPath($UpdatesDirectoryPath)
+    } else {
+        [System.IO.Path]::GetFullPath((Join-Path $root $UpdatesDirectoryPath))
+    }
 } else {
-    Join-Path $root $ConfigPath
+    Join-Path $root 'updates'
 }
-$updatesRoot = Join-Path $root 'updates'
+$configFile = if ($ConfigPath -and [System.IO.Path]::IsPathRooted($ConfigPath)) {
+    $ConfigPath
+} elseif ($ConfigPath) {
+    Join-Path $root $ConfigPath
+} else {
+    Join-Path $updatesRoot 'update-config.json'
+}
 $statePath = Join-Path $updatesRoot 'update-state.json'
 $composeFile = Join-Path $root 'docker-compose.yml'
 $envFile = Join-Path $root '.env'
 
 function Get-EnvValue {
     param([string]$Name)
+    $processValue = [Environment]::GetEnvironmentVariable($Name)
+    if ($processValue) { return $processValue }
+    if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) { return $null }
     foreach ($line in [System.IO.File]::ReadAllLines($envFile)) {
-        if ($line -match ('^' + [regex]::Escape($Name) + '=(.*)$')) {
-            return $Matches[1]
-        }
+        if ($line -match ('^' + [regex]::Escape($Name) + '=(.*)$')) { return $Matches[1] }
     }
     return $null
 }
@@ -183,9 +196,8 @@ function Get-ReleaseBundle {
     }
 }
 
-if ((-not (Test-Path -LiteralPath $composeFile -PathType Leaf)) -or
-    (-not (Test-Path -LiteralPath $envFile -PathType Leaf))) {
-    throw 'Updater requires the installed Compose file and environment file.'
+if (-not (Test-Path -LiteralPath $composeFile -PathType Leaf)) {
+    throw 'Updater requires the installed Compose file.'
 }
 if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) {
     Write-UpdateState -Path $statePath -Status 'not_configured' -Message 'Control-plane update settings are not configured.'
@@ -202,7 +214,12 @@ if ((-not $script:config.controlPlaneUrl) -or
 $publicKeyPath = if ([System.IO.Path]::IsPathRooted($script:config.publicKeyPath)) {
     $script:config.publicKeyPath
 } else {
-    Join-Path $root $script:config.publicKeyPath
+    $configRelativeKey = Join-Path (Split-Path -Parent $configFile) $script:config.publicKeyPath
+    if (Test-Path -LiteralPath $configRelativeKey -PathType Leaf) {
+        $configRelativeKey
+    } else {
+        Join-Path $root $script:config.publicKeyPath
+    }
 }
 if (-not (Test-Path -LiteralPath $publicKeyPath -PathType Leaf)) {
     throw 'Release verification public key is unavailable.'
@@ -212,6 +229,12 @@ $script:projectName = Get-EnvValue 'COMPOSE_PROJECT_NAME'
 if (-not $script:projectName -or $script:projectName -notmatch '^[a-z0-9][a-z0-9_-]*$') {
     throw 'Compose project name is invalid.'
 }
+$configuredWebPort = Get-EnvValue 'WEB_PORT'
+if (-not $configuredWebPort) { $configuredWebPort = '8080' }
+if ($configuredWebPort -notmatch '^[0-9]{1,5}$' -or [int]$configuredWebPort -lt 1 -or [int]$configuredWebPort -gt 65535) {
+    throw 'Configured web port is invalid.'
+}
+$script:healthUri = "http://127.0.0.1:$configuredWebPort"
 
 if (-not $UpdateNow) {
     $timezone = Get-ShopTimeZone ([string]$script:config.timezone)
@@ -268,10 +291,10 @@ $operations = @{
         if ($LASTEXITCODE -ne 0) { throw 'Compose service restart failed.' }
     }.GetNewClosure()
     CheckHealth = {
-        $deadline = [DateTimeOffset]::UtcNow.AddMinutes(3)
+        $deadline = [DateTimeOffset]::UtcNow.AddSeconds($HealthCheckTimeoutSeconds)
         while ([DateTimeOffset]::UtcNow -lt $deadline) {
             try {
-                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/health' -TimeoutSec 5
+                $health = Invoke-RestMethod -Uri "$script:healthUri/api/health" -TimeoutSec 5
                 if ($health.status -eq 'ok' -and $health.database -eq 'ok') { return }
             } catch {}
             Start-Sleep -Seconds 5
@@ -279,7 +302,7 @@ $operations = @{
         throw 'API health check failed after update.'
     }.GetNewClosure()
     SmokeTest = {
-        $status = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/setup/status' -TimeoutSec 10
+        $status = Invoke-RestMethod -Uri "$script:healthUri/api/setup/status" -TimeoutSec 10
         if ($null -eq $status.needsSetup) { throw 'Shop setup smoke test failed.' }
     }.GetNewClosure()
     RestoreImages = {

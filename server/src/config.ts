@@ -19,6 +19,10 @@ const configSchema = z.object({
     (value) => value === '' ? undefined : value,
     z.string().min(1).optional(),
   ),
+  UPDATER_CONFIG_PATH: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().min(1).optional(),
+  ),
   MONGO_HOST: z.string().min(1),
   MONGO_PORT: z.coerce.number().int().min(1).max(65535).default(27017),
   MONGO_APP_DB: z.string().regex(/^[A-Za-z0-9_-]{1,63}$/),
@@ -48,6 +52,7 @@ export type AppConfig = {
   controlPlaneUrl: string | null;
   licencePublicKey: string | null;
   supportTokenPublicKey: string | null;
+  updaterConfigPath?: string | null;
   accessTokenSecret: string;
   refreshTokenPepper: string;
   accessTokenTtlSeconds: number;
@@ -114,6 +119,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     controlPlaneUrl: values.CONTROL_PLANE_URL?.replace(/\/+$/, '') ?? null,
     licencePublicKey: values.LICENCE_PUBLIC_KEY ?? null,
     supportTokenPublicKey: values.SUPPORT_TOKEN_PUBLIC_KEY ?? null,
+    updaterConfigPath: values.UPDATER_CONFIG_PATH ?? null,
     accessTokenSecret: values.JWT_ACCESS_SECRET,
     refreshTokenPepper: values.REFRESH_TOKEN_PEPPER,
     accessTokenTtlSeconds: 15 * 60,

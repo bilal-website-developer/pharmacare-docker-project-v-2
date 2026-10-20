@@ -51,6 +51,7 @@
     "test:control-plane-panel": "tsx --test control-plane/panel/panel-domain.test.ts",
     "test:release-signature": "node --test scripts/release-signature.test.mjs",
     "test:e2e": "playwright test",
+    "test:e2e:real": "playwright test --config playwright.real-stack.config.ts",
     "control-plane:panel:dev": "vite --config control-plane/panel/vite.config.ts --host 127.0.0.1",
     "control-plane:panel:build": "vite build --config control-plane/panel/vite.config.ts",
     "test:server": "npm --prefix server test",

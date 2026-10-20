@@ -74,6 +74,14 @@ test('accepts only a SHA-256 setup-code hash and an offset-aware expiry', () => 
     SETUP_CODE_HASH: 'a'.repeat(64),
     SETUP_CODE_EXPIRES_AT: '2030-01-01T00:00:00.000Z',
   });
+
+  test('accepts the host updater configuration path without exposing it as a secret', () => {
+    assert.equal(
+      loadConfig({ ...validEnv, UPDATER_CONFIG_PATH: '/app/updates/update-config.json' }).updaterConfigPath,
+      '/app/updates/update-config.json',
+    );
+    assert.equal(loadConfig(validEnv).updaterConfigPath, null);
+  });
   assert.equal(setup.setupCodeHash, 'a'.repeat(64));
   assert.equal(setup.setupCodeExpiresAt?.toISOString(), '2030-01-01T00:00:00.000Z');
   assert.equal(loadConfig(validEnv).setupCodeHash, null);

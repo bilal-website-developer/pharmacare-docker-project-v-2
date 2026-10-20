@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
+  testMatch: 'control-plane.spec.ts',
   fullyParallel: false,
   workers: 1,
   retries: 0,

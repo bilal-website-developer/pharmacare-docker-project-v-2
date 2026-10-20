@@ -208,6 +208,19 @@ function errorResponse(error: unknown, reply: FastifyReply): FastifyReply | null
   return reply.code(response.status).send({ error: response.code });
 }
 
+function duplicateKeyFields(error: unknown): string[] {
+  if (typeof error !== 'object' || error === null || !('duplicateKeyFields' in error)) return [];
+  const fields = error.duplicateKeyFields;
+  return Array.isArray(fields)
+    ? fields.filter((field): field is string => typeof field === 'string')
+    : [];
+}
+
+function duplicateKeyStage(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('duplicateStage' in error)) return undefined;
+  return typeof error.duplicateStage === 'string' ? error.duplicateStage : undefined;
+}
+
 export function registerSalesRoutes(
   app: FastifyInstance,
   repository: SalesRepository,
@@ -254,6 +267,11 @@ export function registerSalesRoutes(
       );
       return reply.code(201).send(saleDto(sale));
     } catch (error) {
+      const keyFields = duplicateKeyFields(error);
+      const stage = duplicateKeyStage(error);
+      if (keyFields.length > 0 || stage) {
+        request.log.error({ event: 'sale_duplicate_key', keyFields, stage });
+      }
       const handled = errorResponse(error, reply);
       if (handled) return handled;
       throw error;

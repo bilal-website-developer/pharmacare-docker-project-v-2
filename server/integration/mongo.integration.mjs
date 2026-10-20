@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createHash, generateKeyPairSync, randomUUID, sign as signBytes } from 'node:crypto';
 import Fastify from 'fastify';
 import test, { after, before } from 'node:test';
@@ -1323,9 +1326,12 @@ test('Mongo first-run setup is one-time, password-protected, and concurrent-safe
   const setupConfig = {
     ...config,
     bootstrapShopSlug: `setup-${suffix}`,
+    controlPlaneUrl: 'https://control-plane.example.test',
     setupCodeHash: createHash('sha256').update(setupCode).digest('hex'),
     setupCodeExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
   };
+  const updaterDirectory = await mkdtemp(join(tmpdir(), 'pharmacare-activation-'));
+  setupConfig.updaterConfigPath = join(updaterDirectory, 'update-config.json');
   const signingKeys = generateKeyPairSync('ed25519');
   setupConfig.licencePublicKey = signingKeys.publicKey.export({ format: 'pem', type: 'spki' }).toString();
   const rawDeviceKeys = [];
@@ -1418,6 +1424,18 @@ test('Mongo first-run setup is one-time, password-protected, and concurrent-safe
       createHash('sha256').update(key).digest('hex') === savedControlState.deviceKeyHash), true);
     assert.equal(rawDeviceKeys.includes(savedControlState.deviceKeyHash), false);
     assert.equal(savedControlState.licence.payload.shop_id, `control-${suffix}`);
+    const updaterConfig = JSON.parse(await readFile(setupConfig.updaterConfigPath, 'utf8'));
+    const updaterPublicKey = await readFile(join(updaterDirectory, 'licence-public.pem'), 'utf8');
+    assert.deepEqual(updaterConfig, {
+      controlPlaneUrl: 'https://control-plane.example.test',
+      deviceKeyHash: savedControlState.deviceKeyHash,
+      channel: 'stable',
+      timezone: 'Asia/Karachi',
+      publicKeyPath: 'licence-public.pem',
+    });
+    assert.equal(updaterConfig.deviceKeyHash.length, 64);
+    assert.equal(rawDeviceKeys.includes(updaterConfig.deviceKeyHash), false);
+    assert.equal(updaterPublicKey, setupConfig.licencePublicKey);
     assert.equal(await database.collection(collections.auditLogs).countDocuments({}), 2);
 
     const afterSetupStatus = await app.inject({ method: 'GET', url: '/api/setup/status' });
@@ -1439,6 +1457,7 @@ test('Mongo first-run setup is one-time, password-protected, and concurrent-safe
     }
   } finally {
     await app.close();
+    await rm(updaterDirectory, { recursive: true, force: true });
     await Promise.all(Object.values(collections).map((name) =>
       database.collection(name).deleteMany({}),
     ));

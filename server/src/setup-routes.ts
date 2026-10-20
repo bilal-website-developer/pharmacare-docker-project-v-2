@@ -1,4 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { MongoClient, ObjectId } from 'mongodb';
 import { z } from 'zod';
@@ -143,6 +145,38 @@ function setupCodeMatches(code: string, expectedHash: string): boolean {
   return expected.length === supplied.length && timingSafeEqual(expected, supplied);
 }
 
+async function writeUpdaterConfiguration(
+  config: AppConfig,
+  deviceKeyHash: string,
+  timeZone: string,
+): Promise<void> {
+  if (!config.updaterConfigPath) return;
+  if (!config.controlPlaneUrl || !config.licencePublicKey) {
+    throw new SetupActivationError(503, 'UPDATER_CONFIGURATION_UNAVAILABLE');
+  }
+
+  const directory = dirname(config.updaterConfigPath);
+  const publicKeyPath = join(directory, 'licence-public.pem');
+  const temporaryConfigPath = `${config.updaterConfigPath}.${process.pid}.tmp`;
+  await mkdir(directory, { recursive: true });
+  await writeFile(publicKeyPath, config.licencePublicKey.replace(/\\n/g, '\n').trim() + '\n', {
+    encoding: 'utf8',
+    mode: 0o644,
+  });
+  try {
+    await writeFile(temporaryConfigPath, `${JSON.stringify({
+      controlPlaneUrl: config.controlPlaneUrl,
+      deviceKeyHash,
+      channel: 'stable',
+      timezone: timeZone,
+      publicKeyPath: 'licence-public.pem',
+    }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+    await rename(temporaryConfigPath, config.updaterConfigPath);
+  } finally {
+    await rm(temporaryConfigPath, { force: true });
+  }
+}
+
 export function registerSetupRoutes(
   app: FastifyInstance,
   client: MongoClient,
@@ -191,6 +225,9 @@ export function registerSetupRoutes(
       return reply.code(409).send({ error: 'SETUP_ALREADY_COMPLETED' });
     }
     if (!config.licencePublicKey) return reply.code(503).send({ error: 'LICENCE_VERIFICATION_UNAVAILABLE' });
+    if (config.updaterConfigPath && !config.controlPlaneUrl) {
+      return reply.code(503).send({ error: 'UPDATER_CONFIGURATION_UNAVAILABLE' });
+    }
     let activation: ControlPlaneActivationResponse;
     try {
       activation = await activator(parsed.data.activationCode);
@@ -317,6 +354,12 @@ export function registerSetupRoutes(
       throw error;
     } finally {
       await session.endSession();
+    }
+    try {
+      await writeUpdaterConfiguration(config, deviceKeyHash, parsed.data.timeZone);
+    } catch (error) {
+      request.log.error({ err: error }, 'Failed to provision host updater configuration after setup.');
+      return reply.code(500).send({ error: 'UPDATER_CONFIGURATION_FAILED' });
     }
     return reply.code(201).send({ created: true });
   });

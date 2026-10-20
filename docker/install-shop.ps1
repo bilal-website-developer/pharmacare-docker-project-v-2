@@ -90,6 +90,8 @@ $setupCodeExpiresAt = [DateTimeOffset]::UtcNow.AddHours(4).ToString(
 $lines = @(
     "COMPOSE_PROJECT_NAME=$projectName"
     'WEB_ORIGIN=http://localhost:8080'
+    'WEB_PORT=8080'
+    'UPDATES_DIRECTORY=./updates'
     'VITE_BACKEND=api'
     "VITE_SHOP_SLUG=$slug"
     'MONGO_ROOT_USERNAME=pharmacare_root'
@@ -105,6 +107,9 @@ $lines = @(
     "BOOTSTRAP_SHOP_SLUG=$slug"
     "SETUP_CODE_HASH=$setupCodeHash"
     "SETUP_CODE_EXPIRES_AT=$setupCodeExpiresAt"
+    'CONTROL_PLANE_URL='
+    'LICENCE_PUBLIC_KEY='
+    'UPDATER_CONFIG_PATH=/app/updates/update-config.json'
     'DEMO_MODE=false'
     'DEMO_NODE_ENV=production'
     'VITE_SUPABASE_URL='
@@ -113,6 +118,7 @@ $lines = @(
 
 $encoding = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($envPath, ($lines -join "`n") + "`n", $encoding)
+New-Item -ItemType Directory -Path (Join-Path $repoRoot 'updates') -Force | Out-Null
 $setupCodeHash = $null
 
 Write-Host 'Created a per-install .env without displaying its contents.'

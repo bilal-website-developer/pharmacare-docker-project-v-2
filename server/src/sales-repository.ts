@@ -80,6 +80,18 @@ function duplicateKey(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 11000;
 }
 
+function duplicateKeyFields(error: unknown): string[] {
+  if (typeof error !== 'object' || error === null || !('keyPattern' in error)) return [];
+  const keyPattern = error.keyPattern;
+  if (typeof keyPattern !== 'object' || keyPattern === null || Array.isArray(keyPattern)) return [];
+  return Object.keys(keyPattern).sort();
+}
+
+interface SaleNumberConflict extends Error {
+  duplicateKeyFields: string[];
+  duplicateStage: string;
+}
+
 export class MongoSalesRepository implements SalesRepository {
   private readonly database: Db;
 
@@ -399,6 +411,7 @@ export class MongoSalesRepository implements SalesRepository {
     today: Date,
     roundNet = 'none',
   ): Promise<SaleRecord> {
+    let duplicateStage = 'sale_validation';
     try {
       return await this.transact(async (session) => {
         const now = new Date();
@@ -483,6 +496,7 @@ export class MongoSalesRepository implements SalesRepository {
 
         const discountShares = allocateDiscount(requestedDiscount, loaded.map((item) => item.gross), subtotal);
         const saleId = new ObjectId();
+        duplicateStage = 'sale_number_counter';
         const invoiceNumber = await this.nextNumber(session, actor.shopId, 'SALE', 'INV-');
         const items: SaleItemRecord[] = [];
         for (const [index, item] of loaded.entries()) {
@@ -547,6 +561,7 @@ export class MongoSalesRepository implements SalesRepository {
             ...(item.prescription ? { prescription: item.prescription } : {}),
             batchAllocations: allocations,
           });
+          duplicateStage = 'stock_movements';
           await this.database.collection('stockMovements').insertMany(allocations.map((allocation) => ({
             _id: new ObjectId(),
             shopId: actor.shopId,
@@ -592,8 +607,10 @@ export class MongoSalesRepository implements SalesRepository {
           status: 'COMPLETED',
           items,
         };
+        duplicateStage = 'sales';
         await this.database.collection<SaleRecord>('sales').insertOne(sale, { session });
         await this.transactionCheckpoint('sale.after_sale');
+        duplicateStage = 'sale_payments';
         const paymentRecords: SalePaymentRecord[] = input.payments.map((payment) => ({
           _id: new ObjectId(),
           shopId: actor.shopId,
@@ -616,11 +633,13 @@ export class MongoSalesRepository implements SalesRepository {
           createdAt: now,
         }));
         if (cashEntries.length > 0) {
+          duplicateStage = 'cash_book_entries';
           await this.database.collection('cashBookEntries').insertMany(cashEntries, { session });
         }
         await this.transactionCheckpoint('sale.after_payments');
 
         if (customer && creditAmount > 0n) {
+          duplicateStage = 'customer_ledger';
           const beforeBalance = BigInt(asLong(customer.currentBalancePaisa).toString());
           const nextBalance = beforeBalance + creditAmount;
           const changed = await customers.updateOne({
@@ -651,8 +670,10 @@ export class MongoSalesRepository implements SalesRepository {
           }, { session });
         }
         await this.transactionCheckpoint('sale.after_ledger');
+        duplicateStage = 'audit_logs';
         await this.database.collection<AuditRecord>('auditLogs').insertOne(audit, { session });
         if (requestedDiscount > 0n) {
+          duplicateStage = 'discount_audit_log';
           await this.database.collection<AuditRecord>('auditLogs').insertOne({
             ...audit,
             event: 'sale.discount_applied',
@@ -660,6 +681,7 @@ export class MongoSalesRepository implements SalesRepository {
           }, { session });
         }
         if (input.saleDraftToken) {
+          duplicateStage = 'sale_draft_completion';
           try {
             await this.database.collection<{
               _id: string;
@@ -680,7 +702,12 @@ export class MongoSalesRepository implements SalesRepository {
         return sale;
       });
     } catch (error) {
-      if (duplicateKey(error)) throw new Error('SALE_NUMBER_CONFLICT');
+      if (duplicateKey(error)) {
+        const conflict = new Error('SALE_NUMBER_CONFLICT') as SaleNumberConflict;
+        conflict.duplicateKeyFields = duplicateKeyFields(error);
+        conflict.duplicateStage = duplicateStage;
+        throw conflict;
+      }
       throw error;
     }
   }

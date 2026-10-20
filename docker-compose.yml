@@ -127,7 +127,14 @@ services:
       BOOTSTRAP_SHOP_SLUG: ${BOOTSTRAP_SHOP_SLUG:-main}
       SETUP_CODE_HASH: ${SETUP_CODE_HASH:-}
       SETUP_CODE_EXPIRES_AT: ${SETUP_CODE_EXPIRES_AT:-}
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-}
+      LICENCE_PUBLIC_KEY: ${LICENCE_PUBLIC_KEY:-}
+      UPDATER_CONFIG_PATH: ${UPDATER_CONFIG_PATH:-/app/updates/update-config.json}
       DEMO_MODE: ${DEMO_MODE:-false}
+    volumes:
+      - type: bind
+        source: ${UPDATES_DIRECTORY:-./updates}
+        target: /app/updates
     depends_on:
       mongo:
         condition: service_healthy
@@ -220,7 +227,7 @@ services:
         VITE_SHOP_SLUG: ${VITE_SHOP_SLUG:-main}
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
     depends_on:
       api:
         condition: service_healthy
