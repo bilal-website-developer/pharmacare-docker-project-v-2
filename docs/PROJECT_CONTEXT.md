@@ -44,7 +44,7 @@ The local MongoDB/Fastify API stack is documented in `docs/DOCKER.md`; it requir
 - `docker/`, `docker-compose.yml`, `docker-compose.prod.yml`, `Dockerfile`: local Mongo/API/web container setup, scheduled backup and scratch restore services, loopback-only installer, and Caddy/Nginx configuration. See `docs/DOCKER.md`, `docs/INSTALLER.md`, and `docs/DEPLOYMENT.md`.
 - `docs/`: database references, `MASTER_PLAN.md`, `MULTI_SHOP_FULL_PLAN.md`, execution progress, redesign notes, and this context.
 - `scripts/`, `.githooks/`: context generation and commit-hook tooling.
-- `scripts/update.ps1`, `scripts/update-engine.ps1`, `installer/restore.ps1`, and `docker-compose.lan.yml`: host-side update orchestration, injected transaction tests, archive restore/external-copy helpers, and an optional internal-TLS LAN stack. First-run activation provisions updater configuration under the host-mounted `updates/` directory; real Docker update/rollback rehearsal is in progress.
+- `scripts/update.ps1`, `scripts/update-engine.ps1`, `installer/restore.ps1`, and `docker-compose.lan.yml`: host-side update orchestration, injected transaction tests, archive restore/external-copy helpers, and an optional internal-TLS LAN stack. First-run activation provisions updater configuration under the host-mounted `updates/` directory; real Docker update and forced-health rollback passed on disposable Compose projects.
 - `e2e/`, `playwright.config.ts`: Chromium browser tests with intercepted local fake API routes; no live control plane is contacted.
 - `public/`: static assets and fonts.
 
@@ -156,7 +156,7 @@ Cost visibility decision: Admin may view cost; Manager may view it only with at 
 - 2026-10-20 — `scripts/test-api-compose.ps1` ran `docker compose run --build --rm --no-deps api-test` on unique Mongo project `cp-api-9a1c49fb`: 18 tests passed, 0 failed, 0 skipped. It removed only its own project containers/network and label-verified Mongo volume. Fresh image scan is running; release-folder audit and final checks remain pending.
 - 2026-10-20 — Fresh `scripts/scan-images.ps1` run passed all five release images (API, web, Mongo 8.0.12, Nginx 1.27.5-alpine, Caddy 2.10-alpine), each reporting no `.env`, Supabase URLs/keys, JWT-like values or private keys. Release-folder audit and final checks remain pending.
 - 2026-10-20 — Built a temporary release package outside the repo, scanned five images, signed its manifest with a throwaway Ed25519 key, and verified it. Printed file list contained bundle/manifest/signature/checksum, Compose, installer, scripts, docs; audit found no `.env`, private-key file, key bundle or private-key PEM marker. Temp package/key removed. This proves packaging shape only; real shop publication still requires owner's runtime signing key.
-- 2026-10-20 — Fresh final checks passed: root `npm test` 302 total (284 pass, 0 fail, 18 skipped); lint, web/API build, panel build, fake Playwright 7/7, real Compose Playwright 1/1, API Compose integration 18/18, release-signature 1/1, updater fake transactions 4/4, five-image scan, audit (0 vulnerabilities), and five PowerShell syntax checks. Real Docker update kept 4 users/1 medicine; forced failure rollback restored 71 documents (0 failed) and passed post-rollback health/login/count checks. LAN curl with explicit Caddy root printed HTTP 200. Current continuation changes are being committed locally; no push.
+- 2026-10-20 — Fresh final checks passed: root `npm test` 302 total (284 pass, 0 fail, 18 skipped); lint, web/API build, panel build, fake Playwright 7/7, real Compose Playwright 1/1, API Compose integration 18/18, release-signature 1/1, updater fake transactions 4/4, five-image scan, audit (0 vulnerabilities), and five PowerShell syntax checks. Real Docker update kept 4 users/1 medicine; forced failure rollback restored 71 documents (0 failed) and passed post-rollback health/login/count checks. LAN curl with explicit Caddy root printed HTTP 200. Continuation code was committed locally as `a7de9fd`, `74aa2e3`, and `1e3b964`; documentation is being committed now. No push.
 - 2026-10-20 — Temporary release build scanned all five images, signed the manifest with a throwaway Ed25519 key, and verified its signature. Initial folder audit exited 1 due to an overbroad predicate matching the legitimate `docker/generate-secrets.ps1` tool name; temp package/key were cleaned. Retrying the audit against actual `.env`/key extensions and private-key markers, not ordinary generator filenames.
 - 2026-10-18 — Continued control-plane work on the already-checked-out `feature/control-plane` branch, preserving the pre-existing dirty worktree. Step 8 release bundle build completed; all four image scans passed, and scanner negative checks rejected a synthetic JWT-like value and `.env.example`. Current validation: SQL migration/security checks 15 PASS notices; root tests 300 total (282 passed, 0 failed, 18 skipped); Mongo integration 18/18; direct Edge 8/8, licence 8/8, support 2/2, security 9/9, panel 2/2, setup 2/2; lint/build/panel build passed; `npm audit --omit=dev` reported 0 vulnerabilities. OpenSSL signing and steps 9–14 remain unverified/incomplete.
 - 2026-10-18 — Step 7 adds a standalone mint-themed developer panel at `control-plane/panel/`: Authenticator enrollment/challenge gates, server-checked AAL2/developer access, shop/licence administration, one-time activation-code display, audit and release workflows. Panel domain tests 2/2, Edge tests 8/8, lint and isolated panel build passed. Real Supabase Auth/RLS and browser acceptance remain unverified; step 8 is in progress.
@@ -196,15 +196,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - 2026-10-19 — Replaced OpenSSL-dependent release signing with Node built-in Ed25519 and tested valid/tampered/wrong-key cases. Added host updater, Scheduled Task registration, LAN/restore helpers, owner/support guides, and seven fake-control-plane Chromium tests. Final local root tests: 301 total (283 passed, 0 failed, 18 skipped); unique-project API integration 18/18; lint/build/panel build/audit passed (0 vulnerabilities). External-folder archive copy and tmpfs scratch restore/count parity passed with synthetic data; updater rollback is fake-operation tested only. Activation config provisioning, real updater deployment, Windows Schannel CA trust, real shop HTTPS cookie exchange/firewall, complete export workflows, live Supabase, and hardware/regulatory acceptance remain unverified. See `docs/CONTROL_PLANE_STATE.md`.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-20T13:46:02.378Z
+Generated at (UTC): 2026-10-20T13:47:41.524Z
 Git branch: feature/control-plane
 
 Last 5 commit subjects:
+- Add isolated LAN and API acceptance tests
 - Verify updater rollback health and real data
 - Fix licence setup and sale audit writes
 - Correct final control-plane worktree status
 - Record local validation commits and blockers
-- Document acceptance blockers and licence policy
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 
