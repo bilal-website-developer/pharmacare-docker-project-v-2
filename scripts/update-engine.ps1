@@ -95,6 +95,8 @@ function Invoke-UpdateTransaction {
         catch { $rollbackErrors.Add('database backup restore failed') }
         try { & $Operations.RestartServices }
         catch { $rollbackErrors.Add('service restart failed') }
+        try { & $Operations.CheckHealth }
+        catch { $rollbackErrors.Add('service health check failed after rollback') }
 
         if ($rollbackErrors.Count -gt 0) {
             & $Operations.WriteStatus 'rollback_failed' $version ($rollbackErrors -join '; ')

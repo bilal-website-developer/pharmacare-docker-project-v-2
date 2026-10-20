@@ -7,6 +7,7 @@ function New-FakeOperations {
         [Parameter(Mandatory = $true)][hashtable]$State
     )
 
+    $State.HealthChecks = 0
     return @{
         CaptureImages = { return @('old-api-image', 'old-web-image') }.GetNewClosure()
         CreateBackup = {
@@ -32,7 +33,10 @@ function New-FakeOperations {
         RunMigrations = { $State.MigrationRan = $true }.GetNewClosure()
         RestartServices = { $State.Restarts++ }.GetNewClosure()
         CheckHealth = {
-            if ($Scenario -eq 'forced-failure') { throw 'synthetic health check failure' }
+            $State.HealthChecks++
+            if ($Scenario -eq 'forced-failure' -and $State.HealthChecks -eq 1) {
+                throw 'synthetic health check failure'
+            }
         }.GetNewClosure()
         SmokeTest = { $State.SmokeTestRan = $true }.GetNewClosure()
         RestoreImages = {
@@ -70,7 +74,7 @@ try {
     }
     Write-Host 'PASS: successful update keeps existing data and passes health/smoke checks'
 
-    $failure = @{ Data = 'persistent-records'; Images = 'old-images'; Restarts = 0 }
+    $failure = @{ Data = 'persistent-records'; Images = 'old-images'; Restarts = 0; HealthChecks = 0 }
     try {
         Invoke-UpdateTransaction -Release $release -Operations (New-FakeOperations 'forced-failure' $failure) `
             -StatePath (Join-Path $tempRoot 'failure.json')

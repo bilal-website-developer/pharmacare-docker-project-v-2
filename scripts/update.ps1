@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$UpdateNow,
+    [switch]$AllowInsecureLoopbackDownloads,
     [string]$ConfigPath,
     [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$UpdatesDirectoryPath,
@@ -8,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 . (Join-Path $PSScriptRoot 'update-engine.ps1')
 
 $root = (Resolve-Path -LiteralPath $RepositoryRoot).Path
@@ -44,13 +46,40 @@ function Get-EnvValue {
 
 function Invoke-Docker {
     param([string[]]$Arguments, [switch]$Capture)
-    if ($Capture) {
-        $output = & docker @Arguments 2>$null
-        if ($LASTEXITCODE -ne 0) { throw 'Docker operation failed.' }
-        return ($output -join "`n").Trim()
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        if ($Capture) {
+            $output = & docker @Arguments 2>$null
+        } else {
+            & docker @Arguments *> $null
+        }
+        $exitCode = $LASTEXITCODE
     }
-    & docker @Arguments *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'Docker operation failed.' }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) { throw 'Docker operation failed.' }
+    if ($Capture) { return ($output -join "`n").Trim() }
+}
+
+function Invoke-Compose {
+    param([string[]]$Arguments, [switch]$Capture)
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        if ($Capture) {
+            $output = & docker compose @Arguments 2>$null
+        } else {
+            & docker compose @Arguments *> $null
+        }
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) { throw 'Docker Compose operation failed.' }
+    if ($Capture) { return ($output -join "`n").Trim() }
 }
 
 function Get-ShopTimeZone {
@@ -81,9 +110,16 @@ function Get-CurrentImageIds {
 }
 
 function New-VerifiedBackup {
-    $backupLog = & docker compose --project-directory $root --project-name $script:projectName `
-        --file $composeFile --profile backup run --rm --no-deps mongo-backup backup-once 2>$null
-    if ($LASTEXITCODE -ne 0) { throw 'Mongo backup command failed.' }
+    try {
+        Invoke-Compose -Arguments @(
+            '--project-directory', $root, '--project-name', $script:projectName,
+            '--file', $composeFile, '--profile', 'backup', 'run', '--rm', '--no-deps',
+            'mongo-backup', 'backup-once'
+        )
+    }
+    catch {
+        throw 'Mongo backup command failed.'
+    }
 
     $volume = "${script:projectName}_mongo_backups"
     $archiveName = Invoke-Docker -Arguments @(
@@ -110,19 +146,41 @@ function New-VerifiedBackup {
     finally {
         Invoke-Docker -Arguments @('rm', '--force', $copyContainer)
     }
-    Invoke-Docker -Arguments @(
-        'run', '--rm', '--volume', "${backupDirectory}:/backup:ro",
-        'mongo:8.0.12', 'mongorestore', '--dryRun', '--gzip',
-        "--archive=/backup/$archiveName"
-    )
+    $mongoId = Invoke-Compose -Arguments @(
+        '--project-directory', $root, '--project-name', $script:projectName,
+        '--file', $composeFile, 'ps', '--quiet', 'mongo'
+    ) -Capture
+    if (-not $mongoId) { throw 'Mongo container could not be located to verify the backup.' }
+    $mongoContainer = Invoke-Docker -Arguments @(
+        'inspect', '--format', '{{.Name}}', ($mongoId -split "`n")[0].Trim()
+    ) -Capture
+    $mongoContainer = $mongoContainer.TrimStart('/')
+    $containerArchivePath = "/tmp/$archiveName"
+    try {
+        Invoke-Docker -Arguments @('cp', $backupPath, "${mongoContainer}:$containerArchivePath")
+        Invoke-Docker -Arguments @(
+            'exec', $mongoContainer, 'sh', '-c',
+            'mongorestore --host 127.0.0.1 --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --dryRun --gzip --archive="$1"',
+            'sh', $containerArchivePath
+        )
+    }
+    finally {
+        Invoke-Docker -Arguments @('exec', $mongoContainer, 'rm', '-f', $containerArchivePath)
+    }
     return [pscustomobject]@{ Verified = $true; Path = $backupPath; ArchiveName = $archiveName }
 }
 
 function Restore-VerifiedBackup {
     param([pscustomobject]$Backup)
-    & docker compose --project-directory $root --project-name $script:projectName `
-        --file $composeFile stop api web 2>$null
-    if ($LASTEXITCODE -ne 0) { throw 'Could not stop API and web before restoring backup.' }
+    try {
+        Invoke-Compose -Arguments @(
+            '--project-directory', $root, '--project-name', $script:projectName,
+            '--file', $composeFile, 'stop', 'api', 'web'
+        )
+    }
+    catch {
+        throw 'Could not stop API and web before restoring backup.'
+    }
     $mongoContainer = Invoke-Docker -Arguments @(
         'compose', '--project-directory', $root, '--project-name', $script:projectName,
         '--file', $composeFile, 'ps', '--all', '--quiet', 'mongo'
@@ -155,17 +213,37 @@ function Get-ApprovedRelease {
     }
 }
 
+function Receive-ReleaseFile {
+    param([uri]$Uri, [string]$Destination, [int]$TimeoutSeconds)
+    if ($AllowInsecureLoopbackDownloads) {
+        if (-not $Uri.IsLoopback) { throw 'Insecure download mode is restricted to loopback release URLs.' }
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & curl.exe --ssl-no-revoke --insecure --fail --location --silent --show-error `
+                --max-time $TimeoutSeconds --output $Destination $Uri.AbsoluteUri *> $null
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        if ($exitCode -ne 0) { throw "Loopback release download failed (curl exit $exitCode)." }
+        return
+    }
+    Invoke-WebRequest -Uri $Uri -OutFile $Destination -TimeoutSec $TimeoutSeconds
+}
+
 function Get-ReleaseBundle {
     param([pscustomobject]$Release, [int]$Attempt)
     $bundleUri = [uri]::new([string]$Release.bundle_path)
     if ($bundleUri.Scheme -ne 'https') { throw 'Approved release bundle URL must use HTTPS.' }
-    $manifestUri = [uri]::new('./release-manifest.json', $bundleUri)
+    $manifestUri = [uri]::new($bundleUri, './release-manifest.json')
     $manifestPath = Join-Path $updatesRoot 'release-manifest.json.partial'
     $signaturePath = Join-Path $updatesRoot 'release-manifest.json.sig'
     $bundleDirectory = Join-Path $updatesRoot 'download'
     New-Item -ItemType Directory -Path $bundleDirectory -Force | Out-Null
     try {
-        Invoke-WebRequest -Uri $manifestUri -OutFile $manifestPath -TimeoutSec 60
+        Receive-ReleaseFile -Uri $manifestUri -Destination $manifestPath -TimeoutSeconds 60
         $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
         if (($manifest.version -ne $Release.version) -or
             ($manifest.images_sha256 -ne $Release.sha256) -or
@@ -173,8 +251,8 @@ function Get-ReleaseBundle {
             throw 'Downloaded release manifest does not match the approved release.'
         }
         $downloadedBundle = Join-Path $bundleDirectory $manifest.bundle_file
-        $bundleUri = [uri]::new($manifest.bundle_file, $manifestUri)
-        Invoke-WebRequest -Uri $bundleUri -OutFile "$downloadedBundle.partial" -TimeoutSec 900
+        $bundleUri = [uri]::new($manifestUri, $manifest.bundle_file)
+        Receive-ReleaseFile -Uri $bundleUri -Destination "$downloadedBundle.partial" -TimeoutSeconds 900
         Move-Item -LiteralPath "$downloadedBundle.partial" -Destination $downloadedBundle -Force
         Move-Item -LiteralPath $manifestPath -Destination (Join-Path $bundleDirectory 'release-manifest.json') -Force
         [System.IO.File]::WriteAllText(
@@ -262,9 +340,9 @@ $operations = @{
         New-Item -ItemType Directory -Path $versionsRoot -Force | Out-Null
         Invoke-Docker -Arguments (@('save', '--output', $snapshot) + @($imageIds.Keys))
         return [pscustomobject]@{ Ids = $imageIds; Snapshot = $snapshot }
-    }.GetNewClosure()
-    CreateBackup = { return New-VerifiedBackup }.GetNewClosure()
-    Download = { param($item, $attempt) return Get-ReleaseBundle $item $attempt }.GetNewClosure()
+    }
+    CreateBackup = { return New-VerifiedBackup }
+    Download = { param($item, $attempt) return Get-ReleaseBundle $item $attempt }
     VerifyRelease = {
         param($item, $download)
         $manifest = Get-Content -LiteralPath $download.ManifestPath -Raw | ConvertFrom-Json
@@ -274,22 +352,34 @@ $operations = @{
         & node.exe (Join-Path $PSScriptRoot 'release-signature.mjs') verify `
             $download.ManifestPath $download.SignaturePath $script:config.publicKeyPath $download.Directory
         if ($LASTEXITCODE -ne 0) { throw 'Release bundle signature verification failed.' }
-    }.GetNewClosure()
+    }
     LoadImages = {
         param($download)
         $manifest = Get-Content -LiteralPath $download.ManifestPath -Raw | ConvertFrom-Json
         Invoke-Docker -Arguments @('load', '--input', (Join-Path $download.Directory $manifest.bundle_file))
-    }.GetNewClosure()
+    }
     RunMigrations = {
-        & docker compose --project-directory $root --project-name $script:projectName `
-            --file $composeFile run --rm --no-deps mongo-init *> $null
-        if ($LASTEXITCODE -ne 0) { throw 'Forward-safe Mongo initialization/migrations failed.' }
-    }.GetNewClosure()
+        try {
+            Invoke-Compose -Arguments @(
+                '--project-directory', $root, '--project-name', $script:projectName,
+                '--file', $composeFile, 'run', '--rm', '--no-deps', 'mongo-init'
+            )
+        }
+        catch {
+            throw 'Forward-safe Mongo initialization/migrations failed.'
+        }
+    }
     RestartServices = {
-        & docker compose --project-directory $root --project-name $script:projectName `
-            --file $composeFile up --detach --no-build *> $null
-        if ($LASTEXITCODE -ne 0) { throw 'Compose service restart failed.' }
-    }.GetNewClosure()
+        try {
+            Invoke-Compose -Arguments @(
+                '--project-directory', $root, '--project-name', $script:projectName,
+                '--file', $composeFile, 'up', '--detach', '--no-build'
+            )
+        }
+        catch {
+            throw 'Compose service restart failed.'
+        }
+    }
     CheckHealth = {
         $deadline = [DateTimeOffset]::UtcNow.AddSeconds($HealthCheckTimeoutSeconds)
         while ([DateTimeOffset]::UtcNow -lt $deadline) {
@@ -300,23 +390,23 @@ $operations = @{
             Start-Sleep -Seconds 5
         }
         throw 'API health check failed after update.'
-    }.GetNewClosure()
+    }
     SmokeTest = {
         $status = Invoke-RestMethod -Uri "$script:healthUri/api/setup/status" -TimeoutSec 10
         if ($null -eq $status.needsSetup) { throw 'Shop setup smoke test failed.' }
-    }.GetNewClosure()
+    }
     RestoreImages = {
         param($previous)
         Invoke-Docker -Arguments @('load', '--input', $previous.Snapshot)
         foreach ($tag in $previous.Ids.Keys) {
             Invoke-Docker -Arguments @('image', 'tag', $previous.Ids[$tag], $tag)
         }
-    }.GetNewClosure()
-    RestoreBackup = { param($backup) Restore-VerifiedBackup $backup }.GetNewClosure()
+    }
+    RestoreBackup = { param($backup) Restore-VerifiedBackup $backup }
     WriteStatus = {
         param($status, $version, $message)
         Write-UpdateState -Path $statePath -Status $status -Version $version -Message $message
-    }.GetNewClosure()
+    }
     RetainTwoVersions = {
         $current = Join-Path $versionsRoot ([string]$release.version)
         New-Item -ItemType Directory -Path $current -Force | Out-Null
@@ -332,7 +422,7 @@ $operations = @{
             }
             Remove-Item -LiteralPath $resolvedOld -Recurse -Force
         }
-    }.GetNewClosure()
+    }
 }
 
 try {

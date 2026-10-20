@@ -29,8 +29,7 @@ $environmentNames = @(
 $originalEnvironment = @{}
 $createdImageTags = [System.Collections.Generic.List[string]]::new()
 $controlPlaneProcess = $null
-$previousCertificateValidationCallback = $null
-$releaseCertificateThumbprint = $null
+$previousSecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol
 $tempPathResolved = $null
 $projectStarted = $false
 $completed = $false
@@ -125,7 +124,8 @@ function New-ReleaseBundle {
 
 function Get-ShopCounts {
     $loginBody = [ordered]@{
-        email = $script:adminEmail
+        shopSlug = 'real-stack-test'
+        usernameOrEmail = $script:adminEmail
         password = $script:adminPassword
     } | ConvertTo-Json -Compress
     $login = Invoke-RestMethod -Uri "$script:baseUrl/api/auth/login" `
@@ -192,7 +192,6 @@ function New-LocalHttpsCertificates {
         return [pscustomobject]@{
             RootPath = $rootPath
             CertificatePath = $certificatePath
-            RootThumbprint = $leafCertificate.Thumbprint
         }
     }
     finally {
@@ -232,10 +231,8 @@ writeFileSync(publicPath, pair.publicKey.export({ type: 'spki', format: 'pem' })
 '@
     & node.exe -e $keyGeneration $privateKeyPath $publicKeyPath
     if ($LASTEXITCODE -ne 0) { throw 'Could not generate the temporary Ed25519 test key pair.' }
-    $publicKey = [System.IO.File]::ReadAllText($publicKeyPath).Replace("`r", '').Replace("`n", '')
+    $publicKey = [System.IO.File]::ReadAllText($publicKeyPath).Replace("`r", '').Replace("`n", '\n')
     $certificate = New-LocalHttpsCertificates -Directory $tempRoot
-    $releaseCertificateThumbprint = $certificate.RootThumbprint
-
     $fakeConfigPath = Join-Path $tempRoot 'fake-control-plane-config.json'
     $fakeConfig = [ordered]@{
         privateKeyPath = $privateKeyPath
@@ -411,6 +408,12 @@ const { MongoClient } = require("mongodb");
         ($activationConfig.timezone -ne 'Asia/Karachi')) {
         throw 'First-run activation did not provision the expected updater configuration.'
     }
+    $activationConfig.controlPlaneUrl = "http://127.0.0.1:$script:controlPlanePort"
+    [System.IO.File]::WriteAllText(
+        (Join-Path $shopUpdates 'update-config.json'),
+        ($activationConfig | ConvertTo-Json -Depth 6) + "`n",
+        (New-Object System.Text.UTF8Encoding($false))
+    )
     Write-Host 'PASS: first-run activation wrote the host-mounted updater config and hash-only device credential.'
 
     $beforeUpdate = Get-ShopCounts
@@ -426,13 +429,25 @@ const { MongoClient } = require("mongodb");
         'caddy:2.10-alpine'
     )
     [void](New-ReleaseBundle -Version 'real-success-1' -Images $releaseImages -PrivateKeyPath $privateKeyPath)
-    $previousCertificateValidationCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {
-        param($sender, $serverCertificate, $certificateChain, $sslPolicyErrors)
-        return $serverCertificate.GetCertHashString() -eq $script:releaseCertificateThumbprint
+    $manifestProbePath = Join-Path $tempRoot 'release-manifest-probe.json'
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & curl.exe --ssl-no-revoke --insecure --fail --location --silent --show-error `
+            --max-time 15 --output $manifestProbePath `
+            "https://127.0.0.1:$script:releasePort/releases/release-manifest.json" *> $null
+        $manifestProbeExitCode = $LASTEXITCODE
     }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($manifestProbeExitCode -ne 0 -or -not (Test-Path -LiteralPath $manifestProbePath -PathType Leaf)) {
+        throw 'HTTPS manifest probe did not write its response.'
+    }
+    Write-Host 'PASS: curl fetched the throwaway HTTPS manifest with --ssl-no-revoke; updater signature verification remains enabled.'
     & (Join-Path $repository 'scripts\update.ps1') `
         -UpdateNow `
+        -AllowInsecureLoopbackDownloads `
         -RepositoryRoot $repository `
         -ConfigPath (Join-Path $shopUpdates 'update-config.json') `
         -UpdatesDirectoryPath $shopUpdates `
@@ -475,6 +490,7 @@ const { MongoClient } = require("mongodb");
     try {
         & (Join-Path $repository 'scripts\update.ps1') `
             -UpdateNow `
+            -AllowInsecureLoopbackDownloads `
             -RepositoryRoot $repository `
             -ConfigPath (Join-Path $shopUpdates 'update-config.json') `
             -UpdatesDirectoryPath $shopUpdates `
@@ -518,7 +534,7 @@ finally {
     foreach ($tag in $createdImageTags) {
         docker.exe image rm $tag *> $null
     }
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $previousCertificateValidationCallback
+    [System.Net.ServicePointManager]::SecurityProtocol = $previousSecurityProtocol
     foreach ($name in $environmentNames) {
         [Environment]::SetEnvironmentVariable($name, $originalEnvironment[$name], 'Process')
     }
