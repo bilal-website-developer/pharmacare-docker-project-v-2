@@ -68,7 +68,8 @@ function decodeSignature(signature: string): Uint8Array {
 }
 
 function pemBytes(pem: string): Uint8Array {
-  const encoded = pem.replace(/-----BEGIN [^-]+-----|-----END [^-]+-----|\s/g, '');
+  const normalizedPem = pem.replace(/\\n/g, '\n');
+  const encoded = normalizedPem.replace(/-----BEGIN [^-]+-----|-----END [^-]+-----|\s/g, '');
   const binary = atob(encoded);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);

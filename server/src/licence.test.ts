@@ -140,6 +140,7 @@ test('clock rollback over one day uses last-seen time and shows a clock warning'
 test('server verifier rejects tampering and licences for a different shop', async () => {
   const signed = signLicence(monthly());
   assert.equal(await verifyLicence(signed, publicKeyPem, 'test-shop'), true);
+  assert.equal(await verifyLicence(signed, publicKeyPem.replace(/\n/g, '\\n'), 'test-shop'), true);
   assert.equal(await verifyLicence(signed, publicKeyPem, 'other-shop'), false);
   assert.equal(await verifyLicence({
     ...signed,

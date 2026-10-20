@@ -671,7 +671,7 @@ export class MongoSalesRepository implements SalesRepository {
         }
         await this.transactionCheckpoint('sale.after_ledger');
         duplicateStage = 'audit_logs';
-        await this.database.collection<AuditRecord>('auditLogs').insertOne(audit, { session });
+        await this.database.collection<AuditRecord>('auditLogs').insertOne({ ...audit }, { session });
         if (requestedDiscount > 0n) {
           duplicateStage = 'discount_audit_log';
           await this.database.collection<AuditRecord>('auditLogs').insertOne({

@@ -100,7 +100,11 @@ test('real Compose shop setup, roles, purchase, discounted POS sale, return and 
   const setupResponse = await setupResponsePromise;
   if (setupResponse.status() !== 200 && setupResponse.status() !== 201) {
     const messages = (await page.getByRole('alert').allTextContents()).join(' | ');
-    throw new Error(`Real-stack setup returned HTTP ${setupResponse.status()}; visible messages: ${messages}`);
+    const responseBody = await setupResponse.json().catch(() => null) as { error?: unknown } | null;
+    const errorCode = typeof responseBody?.error === 'string' ? responseBody.error : 'UNKNOWN';
+    throw new Error(
+      `Real-stack setup returned HTTP ${setupResponse.status()} (${errorCode}); visible messages: ${messages}`,
+    );
   }
   await expect(page.getByText('Setup complete. Sign in with your new admin account.')).toBeVisible();
 
