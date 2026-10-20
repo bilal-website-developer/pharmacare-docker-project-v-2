@@ -184,15 +184,15 @@ The future per-shop barcode cutover must backfill one registry across both `medi
 - 2026-10-19 — Replaced OpenSSL-dependent release signing with Node built-in Ed25519 and tested valid/tampered/wrong-key cases. Added host updater, Scheduled Task registration, LAN/restore helpers, owner/support guides, and seven fake-control-plane Chromium tests. Final local root tests: 301 total (283 passed, 0 failed, 18 skipped); unique-project API integration 18/18; lint/build/panel build/audit passed (0 vulnerabilities). External-folder archive copy and tmpfs scratch restore/count parity passed with synthetic data; updater rollback is fake-operation tested only. Activation config provisioning, real updater deployment, Windows Schannel CA trust, real shop HTTPS cookie exchange/firewall, complete export workflows, live Supabase, and hardware/regulatory acceptance remain unverified. See `docs/CONTROL_PLANE_STATE.md`.
 
 <!-- AUTO:START -->
-Generated at (UTC): 2026-10-20T10:26:17.193Z
+Generated at (UTC): 2026-10-20T10:26:39.643Z
 Git branch: feature/control-plane
 
 Last 5 commit subjects:
+- Prepare real-stack updater acceptance
 - Record final control-plane verification
 - Document control-plane operations and verification
 - Add Playwright control-plane browser coverage
 - Add LAN HTTPS and backup restore tooling
-- Add host-side update orchestration
 
 Validation commands: `npm run lint`, `npm test`, and `npm run build`.
 

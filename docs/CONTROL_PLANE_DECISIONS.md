@@ -12,7 +12,7 @@ Status: Active decision record. Implementation progress and test evidence are tr
 | D4 | Plan type and expiry are chosen by owner per shop | Approved | `monthly`, `yearly`, `one_time` |
 | D5 | Offline days and warning days are chosen by owner per shop | Approved | Validated server-side with limits |
 | D6 | A sale draft opened before inactivity may finish once within 60 minutes | Approved | The shop API issues an HMAC-authenticated draft token while sales are permitted; inactive-mode middleware enforces expiry/shop binding and the sale transaction consumes the token once. |
-| D7 | Updates run on the Windows host, not in a Docker socket container | Approved | The installer registers a daily 02:00 Scheduled Task. The host updater requires a verified backup, approved signed release, maintenance-window check, health/smoke checks, rollback, and two-version retention. Runtime control-plane configuration is not yet provisioned by first-run setup. |
+| D7 | Updates run on the Windows host, not in a Docker socket container | Approved | The installer registers a daily 02:00 Scheduled Task. The host updater requires a verified backup, approved signed release, maintenance-window check, health/smoke checks, rollback, and two-version retention. First-run setup writes host-mounted updater configuration with a device-key hash and public verification key; the raw device key and private signing key are never written there. Real Docker update/rollback still requires rehearsal. |
 | D8 | LAN HTTPS uses an internal Caddy certificate and a Private-profile firewall rule | Approved | Mongo remains unpublished. The helper exports the internal root certificate for client trust; real Windows/two-client acceptance remains outstanding. |
 
 ---
@@ -218,3 +218,16 @@ The next step is implementation only after:
 - manual review of local device security and LAN setup.
 
 This document is a design record, not an approval to build or deploy.
+
+## 11. Licensing policy proposal — needs owner and legal review
+
+The following values and behaviors are a proposal, not an approved commercial or regulatory policy:
+
+- Use a 14-day offline grace period. Going beyond it raises an offline warning only; it never blocks the shop. One-time licences never expire and offline status never blocks them.
+- Show the renewal reminder during the configured renewal-notice window to admins only. At expiry, permit normal work for the configured warning period (default 7 days), showing the warning to admins and managers. After that period, enter inactive mode.
+- In inactive or suspended mode, always allow staff to sign in, read and export the shop's own data, view and print records, run reports, and make backups. Block new sales, purchases, and stock mutations. A sale draft authorized by the server before inactivity may be completed for up to 60 minutes.
+- If the local clock is more than 24 hours behind the last-seen time, evaluate time using the last-seen value and show a clock warning; do not grant extra licence time.
+- Heartbeats send the app version and aggregate health counts only. They do not send customer or staff names, phone numbers, sale amounts, credentials, or tokens.
+- Support begins only after a shop admin grants a one-time code. The control plane receives that code for redemption and issues a short-lived signed token restricted to the approved scopes. Diagnostics are limited to service health and shop-scoped aggregate counts; support access and actions are locally audited and may be ended by the shop.
+
+This proposal requires owner and legal review before any customer-facing policy is published or treated as an approved licence term.

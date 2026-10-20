@@ -14,9 +14,9 @@
 3. Keep the one-time setup code private and enter it only in the first-run wizard. Do not place it in a ticket or message.
 4. Obtain an activation code from the control-plane owner and enter both codes in the setup wizard. Create the shop's Admin account with a unique password.
 5. Confirm the browser opens at `http://localhost:8080`, sign in, and verify that the shop, time zone, and licence banners are correct.
-6. The installer creates a daily host Scheduled Task at 02:00. Updates remain inactive until the installation's control-plane update configuration, public verification key, and release channel have been provisioned and tested by the owner.
+6. The installer creates a daily host Scheduled Task at 02:00. First-run activation provisions the updater configuration and public licence-verification key. The control-plane URL, release channel, and signing-key trust must still be configured and tested by the owner before shop updates can be delivered.
 
-The installer creates local credentials in `.env`. Never send or copy that file to support. The code in this repository does not yet provision update configuration during activation; do not assume the Scheduled Task can install releases until the owner completes that integration.
+The installer creates local credentials in `.env`. Never send or copy that file to support. Activation provisions updater configuration, but does not itself prove that a live control plane can deliver an approved release.
 
 ## LAN access
 
@@ -24,12 +24,12 @@ LAN mode is optional and requires Windows administrator rights, Docker Compose, 
 
 1. Pick a DNS name that resolves to the admin PC for client devices.
 2. Run `.\scripts\enable-lan.ps1 -LanHostname <admin-pc-name>` from elevated PowerShell.
-3. Give client PCs the exported `exports\pharmacare-lan-root.crt` through a trusted local channel. Install it in the client computer's trusted root store, then browse to `https://<admin-pc-name>/`.
+3. Give client PCs the exported `exports\pharmacare-lan-root.crt` through a trusted local channel. On each cashier PC, verify the certificate fingerprint with the shop owner over a separate trusted channel. In Windows, open **Start**, search for **Manage user certificates**, open **Trusted Root Certification Authorities > Certificates**, right-click **Certificates**, choose **All Tasks > Import**, select the exported `.crt`, and keep the destination as **Trusted Root Certification Authorities**. Finish the wizard and confirm the certificate appears in that store. Repeat for every Windows account that uses the browser, then browse to `https://<admin-pc-name>/`.
 4. Confirm the browser reports a trusted connection and the pharmacy UI loads before staff sign in.
 5. Firewall access is intended for the Windows Private profile and local subnet only. Do not expose MongoDB or forward port 27017.
 6. Check the admin PC's sleep settings. A sleeping or powered-off server makes the shop unavailable to LAN clients.
 
-This LAN procedure has not been accepted on a real Windows shop PC or tested with two client PCs. Keep loopback-only mode if any step is unclear.
+Do not install a certificate received in an untrusted message or accept a fingerprint that does not match the value confirmed by the shop owner. This LAN procedure has not been accepted on a real Windows shop PC or tested with two client PCs. Keep loopback-only mode if any step is unclear.
 
 ## Backups and restore
 
