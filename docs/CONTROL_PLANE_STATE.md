@@ -26,8 +26,8 @@ Updated: 2026-10-19
 - Done: API Compose integration passed on unique project `cp-api-9a1c49fb`: 18 tests, 18 passed, 0 failed, 0 skipped using `docker compose run --build --rm --no-deps api-test`; the runner started only its own Mongo/init services and cleaned its exact containers/network/project-labeled volumes.
 - Done: Fresh explicit comma-separated image scan passed all five images (`pharma-care-api:local`, `pharma-care-web:local`, `mongo:8.0.12`, `nginx:1.27.5-alpine`, `caddy:2.10-alpine`); each reported no `.env` files, Supabase URLs/keys, JWT-like values, or private keys (exit 0).
 - Done (test package only): Built a temporary release folder outside the repository, scanned all five images, signed the manifest with a throwaway Ed25519 key, and verified it. Printed file list contained the image tar, manifest/signature/checksum, Compose files, installer, scripts and docs; no `.env`, private-key file, key bundle or private-key PEM marker was present. The temporary folder and key were removed. This proves package shape, not a shop release signed by the owner's private key; a real distribution still requires the owner-supplied runtime key.
-- In progress: Implementation and test-runner commits are complete; final state/context documentation is staged for a local documentation commit.
-- Next: Verify the final local commit list and preserve the pre-existing untracked `test-results/`; do not push.
+- Done: Implementation and documentation commits are local on `feature/control-plane`; final `git diff --check` passed. `git status --short` reports only the pre-existing untracked `test-results/`, which was preserved. Nothing was pushed.
+- Next: No local implementation step remains. Real Supabase, owner-key signing/publication, Windows cashier-PC trust, two-client LAN, hardware, and regulatory acceptance remain open as listed below.
 
 ## Test counts and evidence
 
@@ -97,6 +97,6 @@ Updated: 2026-10-19
 - Unique-project Compose API integration: 18 passed, 0 failed, 0 skipped.
 - Release-signature tests: 1 passed; fake updater transaction cases: 4 passed; production dependency audit: 0 vulnerabilities.
 - Five-image secret scan passed; temporary signed release folder verified and contained no `.env` or private-key material.
-- PowerShell syntax checks passed for five scripts; `git diff --check` passed after code changes. Run it again after the final documentation edit before committing.
+- PowerShell syntax checks passed for five scripts; `git diff --check` passed after the final documentation update.
 - Real Docker update retained 4 users/1 medicine; forced rollback restored 71 documents, 0 failures, then passed API health and login/count checks.
 - LAN trust: host curl reported HTTP 200 with `--ssl-no-revoke --cacert` and without `--insecure` on the trust assertion.
